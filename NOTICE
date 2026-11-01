@@ -1,0 +1,37 @@
+DFO Rust Shell
+==============
+
+An experimental, unofficial desktop shell for DFO Online.
+
+Upstream
+--------
+
+DFO Online (https://github.com/Lattymoy/daggerfall-js-source) is MIT-licensed,
+Copyright (c) Lattymoy and contributors, and includes Daggerfall Unity's notice
+(MIT, Copyright (c) Interkarma and contributors). This repository contains no
+game code, no game data and no game assets: it reads a build and an ARENA2
+folder that the player already has.
+
+Attribution
+-----------
+
+src/store.rs is a Rust translation of the storage rules in DFO Online's
+app/lib/fileStorage.cjs (MIT, Copyright (c) Lattymoy and contributors): the
+file layout, the pref-name encoding and the screenshot translation are theirs;
+the translation is ours.
+
+Trademarks
+----------
+
+DFO Online is an independent, unofficial project, not affiliated with or
+endorsed by Bethesda Softworks or ZeniMax Media. The Elder Scrolls and
+Daggerfall are trademarks of ZeniMax Media Inc.
+
+Proof of concept
+----------------
+
+This is an experiment, not a supported product. It writes to the real
+"Daggerfall JavaScript" Prefs/ and Saves/ folders under your user data
+directory. Back them up before running it. It is not for online play. No
+warranty of any kind; the authors are not liable for lost saves, settings, data
+or anything else.
