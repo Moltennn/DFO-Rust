@@ -42,6 +42,7 @@ pub struct Config {
     pub width: f64,
     pub height: f64,
     pub no_near_60_fps: bool,
+    pub serve_only: bool,
 }
 
 impl Config {
@@ -57,6 +58,7 @@ impl Config {
             width: 1280.0,
             height: 800.0,
             no_near_60_fps: false,
+            serve_only: false,
         };
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -86,6 +88,7 @@ impl Config {
                         .expect("bad --height")
                 }
                 "--no-near-60-fps" => cfg.no_near_60_fps = true,
+                "--serve-only" => cfg.serve_only = true,
                 other => panic!("unknown argument: {other}"),
             }
         }

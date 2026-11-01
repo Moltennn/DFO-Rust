@@ -97,6 +97,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             format!("{base}/play/index.html")
         }
     };
+    if cfg.serve_only {
+        eprintln!("[dfo-shell] serving {url} (no window)");
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        }
+    }
+
     eprintln!("[dfo-shell] loading {url}");
 
     let event_loop = EventLoop::new();
