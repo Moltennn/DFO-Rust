@@ -1,0 +1,65 @@
+--- a/Source/WebKit/UIProcess/glib/DisplayVBlankMonitor.cpp
++++ b/Source/WebKit/UIProcess/glib/DisplayVBlankMonitor.cpp
+@@ -31,6 +31,11 @@
+ #include <wtf/TZoneMallocInlines.h>
+ #include <wtf/Vector.h>
+ 
++#if PLATFORM(GTK)
++#include "ScreenManager.h"
++#include <gtk/gtk.h>
++#endif
++
+ #if USE(LIBDRM)
+ #include "DisplayVBlankMonitorDRM.h"
+ #endif
+@@ -67,6 +72,16 @@
+     RELEASE_LOG_FAULT(DisplayLink, "Failed to create DRM vblank monitor, falling back to timer");
+ #endif
+ 
++#if PLATFORM(GTK)
++    // The DRM vblank monitor is unavailable to a Wayland client that is not
++    // the DRM master; the 60 Hz timer fallback then caps the display link at
++    // 60 even on a 144 Hz output. Use the monitor's own refresh rate instead.
++    if (auto* monitor = ScreenManager::singleton().screen(displayID)) {
++        if (auto refreshRate = gdk_monitor_get_refresh_rate(monitor))
++            return DisplayVBlankMonitorTimer::create(refreshRate / 1000);
++    }
++#endif
++
+     return DisplayVBlankMonitorTimer::create();
+ }
+ IGNORE_CLANG_WARNINGS_END
+--- a/Source/WebKit/UIProcess/glib/DisplayVBlankMonitorTimer.h
++++ b/Source/WebKit/UIProcess/glib/DisplayVBlankMonitorTimer.h
+@@ -32,7 +32,8 @@
+ class DisplayVBlankMonitorTimer final : public DisplayVBlankMonitorThreaded {
+ public:
+     static std::unique_ptr<DisplayVBlankMonitor> create();
+-    explicit DisplayVBlankMonitorTimer();
++    static std::unique_ptr<DisplayVBlankMonitor> create(unsigned refreshRate);
++    explicit DisplayVBlankMonitorTimer(unsigned refreshRate);
+ 
+ private:
+     Type type() const override { return Type::Timer; }
+--- a/Source/WebKit/UIProcess/glib/DisplayVBlankMonitorTimer.cpp
++++ b/Source/WebKit/UIProcess/glib/DisplayVBlankMonitorTimer.cpp
+@@ -34,11 +34,16 @@
+ 
+ std::unique_ptr<DisplayVBlankMonitor> DisplayVBlankMonitorTimer::create()
+ {
+-    return makeUnique<DisplayVBlankMonitorTimer>();
++    return create(WebCore::FullSpeedFramesPerSecond);
+ }
+ 
+-DisplayVBlankMonitorTimer::DisplayVBlankMonitorTimer()
+-    : DisplayVBlankMonitorThreaded(WebCore::FullSpeedFramesPerSecond)
++std::unique_ptr<DisplayVBlankMonitor> DisplayVBlankMonitorTimer::create(unsigned refreshRate)
++{
++    return makeUnique<DisplayVBlankMonitorTimer>(refreshRate);
++}
++
++DisplayVBlankMonitorTimer::DisplayVBlankMonitorTimer(unsigned refreshRate)
++    : DisplayVBlankMonitorThreaded(refreshRate)
+ {
+ }
+ 

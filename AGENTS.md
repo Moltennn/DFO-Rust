@@ -37,6 +37,8 @@ ${DFO_STATE_DIR:-$HOME/.local/share/dfo-rust}/
   kwin/               transient KWin scripts used to place/focus Electron and
                       Vivaldi windows during comparisons
   logs/2026-11-01/    screenshots and logs of the comparison
+  webkit-patched/     native spike: WebKitGTK 2.54.2 source, the display-link
+                      patch, build.sh (private prefix) and run-probe.sh
 ```
 
 `DFO_STATE_DIR` overrides the directory; `XDG_DATA_HOME` is respected.
@@ -131,6 +133,11 @@ vblank monitor; that monitor is unavailable here, so it falls back to
 is rejected with "refresh rate 60fps" while the GTK clock is 144). A patch to
 the fallback (use the monitor's refresh) plus a GTK4 shell is the native fix;
 it needs a WebKitGTK rebuild.
+
+The native spike lives in `notes/native-webkit-patch.md`: patch WebKitGTK's
+display-link timer fallback, build it privately, and test with
+`$STATE/webkit-patched/run-probe.sh`. If it reaches 144, the shell ports to
+GTK4; if not, the native route stops there.
 
 ## Comparing against Electron and Chromium
 
