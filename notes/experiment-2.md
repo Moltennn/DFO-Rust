@@ -41,7 +41,8 @@ same store the Electron shell uses.
   finished, which the 3 s sample averages down.
 
 The user's `Prefs/` and `Saves/` were copied to
-`/tmp/opencode/dfo-store-backup/` before the first bridge run; both shells now
+`~/.local/share/dfo-rust/backups/store-2026-11-01/` before the first bridge run (the
+shell's state dir, `DFO_STATE_DIR` overrides); both shells now
 read and write the same files.
 
 ## Window placement (Wayland, KWin 6.7.5)

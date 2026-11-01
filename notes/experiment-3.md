@@ -41,12 +41,13 @@ test and is the documented knob.
 ## The Chromium ceiling
 
 The same page and the same origin, opened in Vivaldi (Chromium) app-mode
-against `./target/debug/dfo-shell --serve-only`:
+against `./tools/run.sh --serve-only`:
 
 ```
-vivaldi-stable --user-data-dir=/tmp/opencode/vivaldi-dfo --no-first-run \
+vivaldi-stable --user-data-dir="$HOME/.cache/dfo-rust/vivaldi" --no-first-run \
   --password-store=basic --remote-debugging-port=9222 \
-  --app=http://127.0.0.1:47565/play/index.html --window-size=1280,800
+  --app='http://127.0.0.1:47565/play/index.html?exterior&region=Sentinel&loc=Sentinel&shot&class=0' \
+  --window-size=1280,772
 ```
 
 Test Room, 1280×800: **144 fps**, median 6.9 ms, p95 7.1 ms, worst 15 ms

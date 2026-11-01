@@ -7,10 +7,10 @@
  *   node tools/enter.mjs
  */
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
-const baseFile = path.join(os.tmpdir(), 'dfo-shell-url');
+import { URL_FILE } from './state.mjs';
+
+const baseFile = URL_FILE;
 let base;
 try {
   base = fs.readFileSync(baseFile, 'utf8').trim();
