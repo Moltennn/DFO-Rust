@@ -75,8 +75,15 @@ tools/run.sh       start (one instance, fixed port)
 tools/stop.sh      stop
 tools/enter.mjs    intro -> Offline -> Test Room -> a character, then measure
 tools/ctl.mjs      evaluate one expression in the page, print the answer
+tools/state.mjs    the one definition of the local state dir
 game/              extracted build (git-ignored, not redistributed)
+AGENTS.md          architecture, tooling, local state, the 60 Hz cap
 ```
+
+Local state and comparison tooling live outside the repository, under
+`~/.local/share/dfo-rust` (`DFO_STATE_DIR` overrides): the running URL, pid and
+log, the store backup, the KWin scripts and the comparison screenshots.
+`AGENTS.md` has the details.
 
 ## Run it
 
