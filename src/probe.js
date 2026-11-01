@@ -116,4 +116,38 @@
     true,
   );
 
+  // The experiment's own door: poll the local server for a JS expression to
+  // run, and post what it answered. This is how the shell is inspected and
+  // driven without touching the mouse. Development only.
+  let busy = false;
+  setInterval(async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const response = await fetch('/__dfo/cmd', { cache: 'no-store' });
+      if (response.status === 200) {
+        const command = await response.json();
+        let value;
+        try {
+          value = await (0, eval)(command.js);
+        } catch (e) {
+          value = { error: String(e) };
+        }
+        let out;
+        try {
+          out = value === undefined ? 'null' : JSON.stringify(value);
+        } catch {
+          out = JSON.stringify(String(value));
+        }
+        await fetch('/__dfo/result', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: out,
+        });
+      }
+    } catch {
+      /* server gone, page unloading */
+    }
+    busy = false;
+  }, 400);
 })();

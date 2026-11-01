@@ -36,6 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::io::Error::other(format!("{e} - is another shell already running?"))
             })?;
             let base = format!("http://{addr}");
+            // tools/ctl.mjs finds the running shell here (dev only).
+            let _ = std::fs::write(std::env::temp_dir().join("dfo-shell-url"), &base);
             eprintln!("[dfo-shell] server {base}");
             format!("{base}/play/index.html")
         }

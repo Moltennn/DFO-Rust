@@ -9,16 +9,25 @@
  * ARENA2 is not bundled (it is the player's copy of Daggerfall), so the folder
  * comes from the game's own config.json - the same key the Electron shell
  * writes - or from --arena2.
+ *
+ * /__dfo/... is the experiment's own door: a command queue the injected probe
+ * polls, so the page can be inspected and driven without touching the mouse
+ * (tools/ctl.mjs). Development only.
  */
 
+use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
-use axum::Router;
+use axum::{Json, Router};
+use serde_json::json;
 use tower_http::services::ServeDir;
 
 #[derive(Clone, Debug)]
@@ -87,9 +96,17 @@ fn default_arena2() -> Option<PathBuf> {
     json.get("arena2Path")?.as_str().map(PathBuf::from)
 }
 
+#[derive(Clone, Default)]
+struct Control {
+    queue: Arc<Mutex<VecDeque<(u64, String)>>>,
+    results: Arc<Mutex<VecDeque<serde_json::Value>>>,
+    next: Arc<AtomicU64>,
+}
+
 #[derive(Clone)]
 struct AppState {
     arena2: Option<PathBuf>,
+    control: Control,
 }
 
 pub fn spawn(cfg: Config) -> std::io::Result<SocketAddr> {
@@ -122,11 +139,14 @@ fn router(cfg: Config) -> Router {
     let files = ServeDir::new(&cfg.root).append_index_html_on_directories(true);
     let state = AppState {
         arena2: cfg.arena2.clone(),
+        control: Control::default(),
     };
     Router::new()
         .route("/", get(|| async { Redirect::temporary("/play/") }))
         .route("/arena2/{name}", get(arena2_file))
         .route("/play/arena2/{name}", get(arena2_file))
+        .route("/__dfo/cmd", get(control_take).post(control_put))
+        .route("/__dfo/result", get(control_results).post(control_result))
         .fallback_service(files)
         .with_state(state)
 }
@@ -151,4 +171,41 @@ async fn arena2_file(
         Ok(bytes) => ([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response(),
         Err(_) => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
+}
+
+/* --------------------------------------------------------------- control */
+
+/// POST /__dfo/cmd  (body: a JS expression) -> queues it for the page.
+async fn control_put(State(state): State<AppState>, body: Bytes) -> Response {
+    let js = String::from_utf8_lossy(&body).trim().to_string();
+    if js.is_empty() {
+        return (StatusCode::BAD_REQUEST, "empty command").into_response();
+    }
+    let id = state.control.next.fetch_add(1, Ordering::Relaxed);
+    state.control.queue.lock().unwrap().push_back((id, js));
+    Json(json!({ "id": id })).into_response()
+}
+
+/// GET /__dfo/cmd -> the next queued command, or 204.
+async fn control_take(State(state): State<AppState>) -> Response {
+    let next = state.control.queue.lock().unwrap().pop_front();
+    match next {
+        Some((id, js)) => Json(json!({ "id": id, "js": js })).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+/// POST /__dfo/result -> what the page answered.
+async fn control_result(State(state): State<AppState>, body: Bytes) -> Response {
+    let text = String::from_utf8_lossy(&body).to_string();
+    let value = serde_json::from_str(&text).unwrap_or_else(|_| json!({ "raw": text }));
+    eprintln!("[ctl] {value}");
+    state.control.results.lock().unwrap().push_back(value);
+    (StatusCode::OK, "ok").into_response()
+}
+
+/// GET /__dfo/result -> drains what the page answered since the last call.
+async fn control_results(State(state): State<AppState>) -> Response {
+    let drained: Vec<_> = state.control.results.lock().unwrap().drain(..).collect();
+    Json(drained).into_response()
 }
