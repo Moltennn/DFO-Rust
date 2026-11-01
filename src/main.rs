@@ -7,6 +7,7 @@
  * module preload, fetch). The shell's job is the window and the ARENA2 folder.
  */
 
+mod placement;
 mod server;
 mod store;
 
@@ -81,6 +82,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webview = builder.build(&window)?;
 
     *handle.borrow_mut() = Some(webview);
+    placement::start();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
