@@ -12,87 +12,92 @@ DFO Online is unofficial and not affiliated with Bethesda Softworks or ZeniMax
 Media. See [NOTICE](NOTICE) for attribution, the upstream licences and the full
 disclaimer. The shell's own code is MIT (see [LICENSE](LICENSE)).
 
-Status: **spike, working.** It boots the current build (0.1.14473), runs it on
-WebKitGTK, serves the player's own ARENA2 from disk, **backs the game's
-localStorage-style store with the same `Saves/` + `Prefs/` files the Electron
-shell uses**, and reports engine facts through a control channel. It does not
-yet have the launcher, updater, menus or crash handling.
+Status: **working spike.** It runs the current game build offline, serves the
+player's own ARENA2 folder, keeps saves and settings in the same files the
+official shell uses, and in its native GTK4 form reaches the monitor's refresh
+rate (165 fps measured). It has no launcher, updater, menus or crash handling
+yet.
 
-## Why this shape
+## How it works
 
-The Electron shell is ~5,000 lines of Node around two things a browser
-normally cannot do: read ARENA2 from a folder, and store saves as files. The
-game page is already a web app, and the mod loader already serves it over
-`http://127.0.0.1`. So the experiment is:
+The game is a web page. The official shell wraps it in Electron to do two
+things a browser usually cannot: read ARENA2 from a folder, and store saves as
+files. This shell does the same with much less machinery:
 
-- **wry + tao** for the window (the same webview engine Tauri wraps; Tauri's
-  framework is not needed for one window and a few commands),
-- **axum** on a *pinned* local port for the game's origin,
-- **WebKitGTK** as the engine on Linux (system dependency, not bundled),
-- a small injected probe for measurements and text-based UI driving.
+- **A window** on WebKitGTK, the system web engine.
+- **A small local web server** on a fixed port (47565), serving the game files
+  and ARENA2.
+- **A probe** injected into the page, used for measurements and for driving the
+  UI without touching the mouse.
+- **Files on disk** for saves and settings, in the official shell's own folders.
 
-The port is pinned (47565) because WebKitGTK keys `localStorage` and IndexedDB
-by origin, and an origin includes the port. A random port gives the game a
-fresh profile every launch. That was measured, not assumed.
+The port is fixed because the engine ties the game's stored data to the page
+address, and that address includes the port. A random port would give the game
+a fresh profile on every launch.
 
-### The storage bridge
+### Saves and settings
 
-The page's seam speaks `localStorage`'s five words synchronously, and the
-Electron preload answered them with synchronous file IO. This shell keeps the
-contract:
+The page's storage is read from the server into memory when it loads, so reads
+never wait on anything. Writes go straight to disk, so a failed write is
+reported to the game at once. The server stores them as `Prefs/<key>` and
+`Saves/SAVE<n>/` (`SaveData.txt`, `SaveInfo.txt`, `Screenshot.jpg`), written in
+one step so a crash cannot leave a half file.
 
-- at document start, an initialization script seeds an in-memory map from
-  `GET /__store/all` (a synchronous XHR - reads never block on IPC),
-- `setItem` / `removeItem` post the write with a synchronous XHR, so a disk
-  failure still throws at the caller (the game's quota contract),
-- the server writes the same files (`src/store.rs`): `Prefs/<key>` with the
-  shell's percent-encoded names, `Saves/SAVE<n>/SaveData.txt`, `SaveInfo.txt`,
-  and `Screenshot.jpg` (data URLs translated), all temp-then-rename,
-- `length()` rescans the index every 2 s, so a save copied into the folder
-  appears, as it does under Electron.
-
-The root is the Electron shell's own: `DAGGER_USER_DATA`, else
-`$XDG_CONFIG_HOME/Daggerfall JavaScript`. Both shells therefore read and write
-one store, which is what makes an A/B comparison with the same settings honest.
+The folder is the official shell's own: `DAGGER_USER_DATA`, else
+`$XDG_CONFIG_HOME/Daggerfall JavaScript`. Both shells read and write the same
+store.
 
 ### Window placement
 
-Wayland clients cannot position themselves. On KDE, the shell asks KWin to
-`sendClientToScreen` the window (see `src/placement.rs`): `DFO_WINDOW` names an
-output, `leftmost` (default), `<name>:fullscreen`, or `off`. That is the same
-result the modding tools' `dfo place DP-1` gets with xdotool on XWayland.
+Wayland clients cannot place themselves. On KDE, the wry shell asks KWin to
+send the window to a chosen output (`src/placement.rs`): `DFO_WINDOW` names an
+output, `leftmost` (default), `<name>:fullscreen`, or `off`.
+
+The native GTK4 shell leaves placement to KWin, so the window opens on the
+active output — the display whose refresh rate its frame timing follows.
+
+## The two shells
+
+| | `wry` (default) | `gtk4-shell` (native) |
+|---|---|---|
+| window | GTK3 | GTK4 |
+| engine | system WebKitGTK 4.1 | privately built WebKitGTK 6.0, patched |
+| frame rate | 60 fps (engine limit) | the monitor's rate (165 fps measured) |
+| build | `cargo build` | `./tools/build-native.sh` |
+| run | `./tools/run.sh` | `./tools/run-native.sh` |
+
+The system WebKit is never modified. The GTK4 shell links a private copy of
+WebKitGTK whose frame timing uses the monitor's refresh rate instead of a
+hard-coded 60. Patch and build steps: `notes/native-webkit-patch.md`.
 
 ## Layout
 
 ```
-src/lib.rs         shared: origin, store, placement, probe, state dir
+src/lib.rs         shared: server, store, placement, probe, state dir
 src/main.rs        the wry/GTK3 window (default feature)
-src/server.rs      the local origin: dist/, arena2/, __store/, __dfo/
-src/store.rs       the file store (Prefs/ + Saves/, same layout as Electron)
+src/server.rs      the local server: game files, ARENA2, storage, control channel
+src/store.rs       the file store (Prefs/ + Saves/)
 src/placement.rs   KWin: send the window to an output (Wayland)
-src/probe.js       injected page probe + the daggerShell storage bridge
+src/probe.js       injected page probe + the storage bridge
 gtk4-shell/        native GTK4 + WebKitGTK 6.0 shell and its C shim
 tools/extract-build.mjs   app.asar -> plain game/dist + launcher/
 tools/run.sh       start the wry shell (one instance, fixed port)
-tools/run-native.sh       start the GTK4 shell (private patched WebKit)
+tools/run-native.sh       start the GTK4 shell
 tools/stop.sh      stop either shell
 tools/enter.mjs    intro -> Offline -> Test Room -> a character, then measure
 tools/ctl.mjs      evaluate one expression in the page, print the answer
 tools/state.mjs    the one definition of the local state dir
 game/              extracted build (git-ignored, not redistributed)
-AGENTS.md          architecture, tooling, local state, the 60 Hz cap
 ```
 
-Local state and comparison tooling live outside the repository, under
-`~/.local/share/dfo-rust` (`DFO_STATE_DIR` overrides): the running URL, pid and
-log, the store backup, the KWin scripts and the comparison screenshots.
-`AGENTS.md` has the details.
+Local state lives outside the repository under `~/.local/share/dfo-rust`
+(`DFO_STATE_DIR` overrides): the running URL, pid and log, the store backup and
+the placement scripts. `AGENTS.md` has the details.
 
 ## Run it
 
-Requirements: Rust, `webkit2gtk-4.1`, `gtk3`. ARENA2 comes from the Electron
-shell's `~/.config/Daggerfall JavaScript/config.json` (`arena2Path`), or
-`--arena2 <dir>`.
+Requirements: Rust, `webkit2gtk-4.1`, `gtk3`. ARENA2 comes from
+`~/.config/Daggerfall JavaScript/config.json` (`arena2Path`), or `--arena2`.
 
 ```bash
 # one-time: pull the current build out of the installed AppImage's app.asar
@@ -107,116 +112,69 @@ node tools/enter.mjs        # walk to the Test Room and measure
 ./tools/stop.sh
 ```
 
-`node tools/ctl.mjs 'document.title'` is the inspection door: it queues a JS
-expression that the page evaluates and answers. It exists because driving the
-UI with `xdotool` moves the real cursor; this does not touch it.
+`node tools/ctl.mjs 'document.title'` evaluates one JavaScript expression in
+the page and prints the answer.
 
-### The native GTK4 route (144+ fps)
+### Native GTK4 shell
 
-The wry shell is GTK3, and GTK3's frame clock is 59 Hz. `gtk4-shell` is the
-same shell on GTK4 + WebKitGTK 6.0, linked against a **private** patched
-WebKitGTK (2.54.2) whose display-link timer takes the monitor's refresh instead
-of a hard-coded 60. The system WebKit is untouched; the patch, build and caveats
-are in `notes/native-webkit-patch.md`.
+Needs the patched WebKitGTK 6.0 built first (see
+`notes/native-webkit-patch.md`); it installs to `~/.local/webkitgtk-patched`.
 
 ```bash
-./tools/build-native.sh   # PKG_CONFIG_PATH -> ~/.local/webkitgtk-patched
-./tools/run-native.sh     # LD_LIBRARY_PATH  -> the same prefix
+./tools/build-native.sh
+./tools/run-native.sh
 node tools/enter.mjs
 ./tools/stop.sh
 ```
 
-The two shells share one store and one origin; the run scripts refuse to start
-one while the other is up.
+Both shells share one store and one port; the run scripts refuse to start one
+while the other is up.
 
-## What has been measured
+## Measured
 
-On this machine (AMD Ryzen 7 5700X3D, 8C/16T; Radeon RX 6750 XT; Mesa 26.2.4;
-WebKitGTK 2.54.1; 1280×800):
+Test machine: Ryzen 7 5700X3D, Radeon RX 6750 XT, Mesa 26.2.4, Plasma 6 /
+Wayland.
 
-| | |
+| | `wry` / GTK3 | native GTK4 |
+|---|---|---|
+| engine | WebKitGTK 2.54.1 | WebKitGTK 2.54.2, patched |
+| display | 1920×1080 @ 144 Hz | 2560×1440 @ 165 Hz |
+| Sentinel, 64 blocks / 568 draws | 59 fps, 17 ms | **165 fps, 6.1 ms** |
+| Test Room | 60 fps, 17 ms | 144–154 fps, 6.5–7.0 ms |
+
+The Test Room is the slower scene on the GTK4 shell because it draws more
+(948 draws against Sentinel's 568); the engine is the constraint, not the
+display.
+
+| measurement | result |
 |---|---|
-| first paint / load | ~0.7 s (`load` event, local files) |
-| `DOMContentLoaded` | ~0.3 s |
-| world ready (Test Room) | ~26 s (world generation, same work as under Electron) |
-| in-world frame rate | **60 fps**, median 17 ms, worst 43 ms |
-| module workers | supported (`new Worker(..., {type:'module'})`) |
-| `OffscreenCanvas` | supported |
-| WebGL2 | yes, `Apple GPU` / `Apple Inc.` — WebKitGTK sanitizes the real adapter (system GL reports `radeonsi`/RX 6750 XT) |
-| memory, in world | shell ~170 MB, WebKitWebProcess ~2.5 GB, network ~90 MB |
-| file store | 96 keys from the player's real `Prefs/` + `Saves/`; the Load Game screen lists the real characters |
-| window | on DP-1 (leftmost) at 320,471, 1280×800 content |
+| first paint | ~0.7 s |
+| world ready (Test Room) | ~26 s |
+| 3D graphics (WebGL2) | yes |
+| saves and settings | 96 real entries; Load Game lists the real characters |
+| memory in world | game process ~2.5 GB, network ~90 MB |
+| content size | 1280×800 |
 
-Those numbers are WebKitGTK *with a hardware context*. If a machine falls back
-to llvmpipe, the same page will not hold 60 fps.
-
-### Against Electron, same build and settings
-
-Build 0.1.14473, same store (the player's real `Prefs/` + `Saves/`), 1280×772
-content on the leftmost output (1920×1080 @ 144 Hz):
-
-| | Electron 42 | Rust + WebKitGTK | Chromium (Vivaldi app-mode) |
-|---|---|---|---|
-| Test Room fps | 144 | **60** | 144 |
-| Test Room median / p95 | 6.9 / 7.3 ms | 17 / 18 ms | 6.9 / 7.1 ms |
-| Sentinel city fps | — | **59** | **144** |
-| Sentinel median / p95 | — | 17 / 22 ms | 6.9 / 7.1 ms |
-| total RSS (Test Room) | 2.9 GB | 3.64 GB | not measured |
-
-The Sentinel scene is 64 blocks / 568 draws — the heaviest ordinary city the
-scene router offers. The 60 fps cap is WebKitGTK's, not the page's frame cap:
-the same page follows 144 Hz under Chromium on the same output. GTK4 +
-WebKitGTK 6.0 does not help either: its frame clock is 144 Hz and the near-60
-feature is off, yet rAF still measures ~62 fps (`tools/gtk4-raf.py`). The
-cause is WebKitGTK's GLib display link: its DRM vblank monitor is unavailable
-here, so it uses a 60 Hz timer fallback (`DisplayVBlankMonitorTimer`), while
-the GTK clock reports 144 Hz. It is not VSync or the mixed 144/165/60 Hz
-monitor layout either: 144 Hz and 165 Hz outputs, Mesa `vblank_mode=0`,
-XWayland and compositing off all stay at 60, while Chromium with
-`--disable-gpu-vsync --disable-frame-rate-limit` reaches **243 fps / 4 ms** in
-the same Sentinel scene. There is no memory win either; the game's heap
-dominates both. Details in `notes/comparison.md` and
-`notes/experiment-3.md`.
-
-### The native GTK4 shell (patched WebKitGTK)
-
-`gtk4-shell` with the private patched WebKitGTK 2.54.2, on the main output
-(DP-3, 2560×1440 @ 165 Hz, 1280×800 content):
-
-| | |
-|---|---|
-| Sentinel city fps | **165** |
-| Sentinel mean / worst frame | 6.07 / 13 ms |
-| GTK4 frame clock | 6067 µs |
-| Test Room (948 draws) | ~144–154, CPU-bound |
-| storage bridge | `daggerShell.storage` round trip verified against the real store |
-
-The display link follows the display the page first sees (DP-3, the main
-display) rather than the window's output: a window on DP-1 still gets the
-165 Hz link while its GTK clock is 144, and moving it does not repoint the
-link. That is fine while the game is played on DP-3; see
-`notes/native-webkit-patch.md`. The fallback is a timer, not vblank-synced, so
-tearing/jitter is possible even at the right rate.
+These numbers assume hardware graphics. A machine that falls back to software
+rendering will not hold 60 fps.
 
 ## Known gaps / next steps
 
-1. **Single instance.** The pinned port already refuses a second shell
-   (`AddrInUse`); make it a real single-instance lock that raises the window.
+1. **Single instance.** The fixed port already refuses a second shell; make it
+   a real lock that raises the window instead.
 2. **The launcher.** `game/launcher/` is extracted and unchanged; its bridge is
    two words (`onView`, `act`), easy to port once the game window is settled.
 3. **ARENA2 detection and the folder picker** (Steam/GOG/DFU settings search) —
-   the Electron shell's `arena2Detect.cjs` is the reference.
-4. **The 144 fps question is settled for the native stack.** Sentinel was
-   measured at 165 fps on DP-3 with `gtk4-shell` and the private patched
-   WebKitGTK 6.0; the stock WebKit (wry/GTK3 or GTK4) is capped at ~60 by its
-   display-link timer. The remaining native work is packaging the patched
-   WebKit (~150 MB) and, for DP-1 at 144, a second display-link selection
-   patch. Chromium app-mode stays an alternative if a browser dependency is
-   acceptable.
-5. **Mod loader integration.** The mods patch the served bytes; a shell that
-   serves `game/dist` can apply the same view/overlay before responding.
-   The control channel is a placeholder for the `dfo` CDP tooling on Linux,
-   which does not exist for WebKitGTK.
+   the official shell's `arena2Detect.cjs` is the reference.
+4. **Packaging the patched WebKit** (~150 MB). Until the patch is upstream, the
+   native shell needs a private build on each machine.
+5. **Display selection.** Frame timing follows the main display rather than the
+   window's output: fine for play there, but a second patch would be needed for
+   other outputs.
+6. **Mod loader integration.** The mods patch the served bytes; a shell that
+   serves `game/dist` can apply the same view/overlay before responding. The
+   control channel is a placeholder for the `dfo` CDP tooling on Linux, which
+   does not exist for WebKitGTK.
 
 ## Licensing
 

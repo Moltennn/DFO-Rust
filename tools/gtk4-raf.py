@@ -15,8 +15,8 @@ Start the local origin first if the URL is the game:
 Result (2026-11-01, WebKitGTK 6.0 2.54.2, GTK 4.24.1, 144 Hz DP-1): the
 frame clock is 6944 us (144 Hz), the near-60 feature is off, the window is
 focused and visible, and rAF is still ~62 fps / 16 ms. The cap is in
-WebKitGTK's animation scheduling, not GTK's frame clock:
-notes/experiment-3.md.
+WebKitGTK's frame timing, not GTK's frame clock; the fix is
+notes/native-webkit-patch.md.
 """
 import json
 import sys

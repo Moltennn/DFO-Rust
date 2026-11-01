@@ -1,7 +1,7 @@
 # Native spike: patched WebKitGTK 6.0
 
-Goal: a **native GTK4 shell at 144 fps**, without Chromium. The 60 Hz cap is
-not GTK4's frame clock; it is WebKitGTK's GLib display link:
+Goal: a **native GTK4 shell at the monitor's refresh rate**. The 60 Hz cap is
+not GTK4's frame clock; it is WebKitGTK's frame timing:
 
 - `DisplayLinkGLib` asks `DisplayVBlankMonitor` for the rate.
 - The DRM vblank monitor is unavailable here (`drmWaitVBlank` fails for a
@@ -59,8 +59,8 @@ It sets `LD_LIBRARY_PATH` and `GI_TYPELIB_PATH` to the private prefix and runs
     WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS=144 \
       ~/.local/share/dfo-rust/webkit-patched/run-probe.sh
 
-With the patch, the throttle value is accepted (the refresh is 144) and rAF
-should be ~144 on DP-1; the GTK4 clock is already 144.
+With the patch, the throttle value is accepted (the refresh matches the
+display) and the page follows the monitor's rate; the GTK4 clock already does.
 
 ## If it works
 
@@ -92,18 +92,19 @@ DP-1 (GTK frame clock 6944 µs / 144 Hz), DP-1 is primary, and the window opened
 on DP-1. ScreenManager knows displayID 1 is the VG248 at 144 Hz; the page/link
 does not switch to it. Moving the window later does not update the link.
 
-So the 60 Hz cap is fixed, but the display selection is not: `rAF` follows the
-page's initial display (DP-3), not the window's output. Options:
+So the 60 Hz cap is fixed, but the display selection is not: the page follows
+the first display it sees (DP-3, the main display here), not the window's
+output. The options were:
 
-- a second WebKit patch to switch/refresh the page display link on
-  `windowScreenDidChange` (page/display-link plumbing; more research);
-- place the window at creation on the link's display (DP-3), or run that
-  display at 144 Hz — not the leftmost DP-1;
-- Firefox/Chromium for the 144 fps DP-1 client;
-- stop the native route here.
+- a second WebKit patch to switch/refresh the page's display on
+  `windowScreenDidChange` (page/frame-timing plumbing; more research);
+- place the window at creation on the display the page follows, or run that
+  display at a matching rate;
+- accept it and play on that display.
 
-The timer is also not vblank-synced, so the link at 165 on a 144 Hz window
-would drop/tear; matching the link to the window is essential, not cosmetic.
+The third option is the one taken: the game is played on DP-3 (the main
+display), and the shell follows it at 165 fps. The timer is also not
+vsync-locked, so a link rate that does not match the window would drop/tear.
 
 ## The shell
 

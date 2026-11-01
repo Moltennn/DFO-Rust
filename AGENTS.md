@@ -24,7 +24,7 @@ src/probe.js       injected probe + daggerShell storage bridge
 gtk4-shell/        native GTK4 + WebKitGTK 6.0 binary and its C shim
 tools/             extract-build.mjs, run.sh, run-native.sh, stop.sh, ctl.mjs,
                    enter.mjs, build-native.sh, state.mjs (state dir)
-notes/             experiments 1-3, the Electron comparison, the native spike
+notes/             experiments 1-2 and the native spike
 ```
 
 Local state and tooling, **outside the repo and outside `/tmp`**:
@@ -38,8 +38,8 @@ ${DFO_STATE_DIR:-$HOME/.local/share/dfo-rust}/
   shell-native.log    the GTK4 shell's stderr/stdout
   backups/store-2026-11-01/    the player's Prefs/ + Saves/ copy taken before
                                the first bridge run (restore by copying back)
-  kwin/               transient KWin scripts used to place/focus Electron and
-                      Vivaldi windows during comparisons
+  kwin/               transient KWin scripts used to place/focus the Electron
+                      and native windows during comparisons
   logs/2026-11-01/    screenshots and logs of the comparison
   webkit-patched/     native spike: WebKitGTK 2.54.2 source, the display-link
                       patch, build.sh (private prefix) and run-probe.sh
@@ -141,49 +141,31 @@ The game's own scene router is the teleport for locations:
 
 ## The 60 Hz cap
 
-GTK3's frame clock is 16667 µs (59 Hz) in every configuration tried. The
-WebKit `PreferPageRenderingUpdatesNear60FPS` feature and `GDK_GL=disable`
-(each, and together), XWayland, and disabling compositing do not move it. The
-same page in Chromium (Vivaldi app-mode) is 144 fps. `notes/experiment-3.md`
-has the matrix.
+The stock engine limits the page to about 60 fps, independent of the display.
+GTK3's frame clock is 16667 µs (59 Hz); GTK4 with WebKitGTK 6.0 has a 144 Hz
+clock and the near-60 feature off, yet the page still measures ~62 fps
+(`tools/gtk4-raf.py`).
 
-**GTK4 + WebKitGTK 6.0 with the stock library was tested too** (2.54.2,
-`tools/gtk4-raf.py`): the GTK4 frame clock is 6944 µs (144 Hz), the near-60
-feature is off at web-process construction, the window is focused and visible,
-and rAF is still ~62 fps / 16 ms. Setting GTK4 aside, the cap is WebKitGTK's
-GLib display-link timer fallback, which is what the native patch replaces.
+The cause is WebKitGTK's frame timing. It takes the rate from a DRM vblank
+monitor; that monitor is unavailable to a Wayland client that is not the DRM
+master, so it falls back to `DisplayVBlankMonitorTimer`, hard-coded to 60. The
+giveaway: `WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS=144` is rejected with "not a
+factor of refresh rate 60fps" while the GTK clock is 144. A single-output run
+still reports 60, so it is not the monitor layout, and VSync / compositing
+settings do not change it.
 
-Output refresh and VSync are not the cause either: 144 Hz (DP-1) and 165 Hz
-(DP-3) outputs both give ~62 fps while the GTK clock is 6944/6067 µs;
-`vblank_mode=0`, XWayland and `WEBKIT_DISABLE_COMPOSITING_MODE=1` are all ~62.
-Chromium with `--disable-gpu-vsync --disable-frame-rate-limit` reaches
-**243 fps** in the same Sentinel scene. The remaining non-native options are
-Chromium app-mode (144, but a browser dependency) or CEF (bundled Chromium);
-the native option is the patched WebKit below.
+The fix is a small patch to that fallback: pass the monitor's refresh rate to
+the timer. `notes/native-webkit-patch.md` has the patch, the private build
+(`~/.local/webkitgtk-patched`) and the caveats. With it, `gtk4-shell/` runs
+Sentinel at **165 fps, mean 6.07 ms** on DP-3.
 
-The root of it: WebKitGTK's GLib `DisplayLink` takes its rate from a DRM
-vblank monitor; that monitor is unavailable here, so it falls back to
-`DisplayVBlankMonitorTimer`, hard-coded to 60 (`WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS=72`
-is rejected with "refresh rate 60fps" while the GTK clock is 144). A patch to
-the fallback (use the monitor's refresh) plus a GTK4 shell is the native fix;
-it needs a WebKitGTK rebuild.
+One caveat remains: the page's frame timing follows the first display it sees
+(DP-3, the main display here), not the window's output, and moving the window
+does not repoint it. Fine for play on DP-3; another patch would be needed for
+other outputs. The fallback is also a timer, not vsync-locked, so tearing is
+possible even at the right rate.
 
-The native fix is built and works: `notes/native-webkit-patch.md` has the
-patch, the private build and the second issue. The patched WebKitGTK 2.54.2
-(GTK4, `~/.local/webkitgtk-patched`) makes `DisplayVBlankMonitorTimer` take the
-monitor's refresh, and `gtk4-shell/` runs the game on it: on DP-3 / 165 Hz,
-Sentinel (64 blocks / 568 draws) holds **165 fps, mean 6.07 ms**, with a
-6067 µs GTK4 frame clock.
-
-One caveat remains: the page's display link follows the display it first sees
-(DP-3, the main display) rather than the window's output. A window on DP-1
-still gets the 165 Hz link while its GTK clock is 144, and moving the window
-does not repoint it. That is acceptable while the game is played on DP-3; a
-second display-link selection patch would be needed otherwise. The fallback is
-also a timer, not vblank-synced, so tearing/jitter is possible even at the
-right rate.
-
-## Comparing against Electron and Chromium
+## Comparing against Electron
 
 Both need a free store (do not run two shells against it at once) and the same
 build. The current build is the installed AppImage's `app.asar` (0.1.14473 at
@@ -200,23 +182,11 @@ dfo enter                 # it times out on __playerEntity (stock has no mods);
 dfo eval '<rAF expression>'
 ```
 
-Chromium app-mode against the Rust origin:
-
-```bash
-./tools/run.sh --serve-only
-vivaldi-stable --user-data-dir="$HOME/.cache/dfo-rust/vivaldi" \
-  --no-first-run --password-store=basic --remote-debugging-port=9222 \
-  --window-size=1280,772 \
-  --app='http://127.0.0.1:47565/play/index.html?exterior&region=Sentinel&loc=Sentinel&shot&class=0'
-```
-
-Place/focus windows on the leftmost output with the scripts in
-`$STATE/kwin/` (classified by window class: `dfo-online`, `dfo-shell`,
-`vivaldi-127.0.0.1__play_index`), loaded through
-`org.kde.KWin.Scripting` (`qdbus6 ... loadScript <file> <name>` then `start`).
-KWin's scriptable `move`/`moveResize` are booleans, not methods;
-`workspace.sendClientToScreen(window, output)` is what works. Wayland clients
-cannot position themselves.
+Place/focus it on an output with the scripts in `$STATE/kwin/` (window class
+`dfo-online`), loaded through `org.kde.KWin.Scripting` (`qdbus6 ... loadScript
+<file> <name>` then `start`). KWin's scriptable `move`/`moveResize` are
+booleans, not methods; `workspace.sendClientToScreen(window, output)` is what
+works. Wayland clients cannot position themselves.
 
 ## Data safety
 
