@@ -22,13 +22,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::json;
 use tower_http::services::ServeDir;
+
+use crate::store::Store;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -107,6 +110,8 @@ struct Control {
 struct AppState {
     arena2: Option<PathBuf>,
     control: Control,
+    store: Arc<Store>,
+    write_lock: Arc<Mutex<()>>,
 }
 
 pub fn spawn(cfg: Config) -> std::io::Result<SocketAddr> {
@@ -140,6 +145,8 @@ fn router(cfg: Config) -> Router {
     let state = AppState {
         arena2: cfg.arena2.clone(),
         control: Control::default(),
+        store: Arc::new(Store::new(crate::store::root())),
+        write_lock: Arc::new(Mutex::new(())),
     };
     Router::new()
         .route("/", get(|| async { Redirect::temporary("/play/") }))
@@ -147,6 +154,11 @@ fn router(cfg: Config) -> Router {
         .route("/play/arena2/{name}", get(arena2_file))
         .route("/__dfo/cmd", get(control_take).post(control_put))
         .route("/__dfo/result", get(control_results).post(control_result))
+        .route("/__store/all", get(store_all))
+        .route("/__store/keys", get(store_keys))
+        .route("/__store/get", get(store_get))
+        .route("/__store/set", axum::routing::post(store_set))
+        .route("/__store/remove", axum::routing::post(store_remove))
         .fallback_service(files)
         .with_state(state)
 }
@@ -208,4 +220,56 @@ async fn control_result(State(state): State<AppState>, body: Bytes) -> Response 
 async fn control_results(State(state): State<AppState>) -> Response {
     let drained: Vec<_> = state.control.results.lock().unwrap().drain(..).collect();
     Json(drained).into_response()
+}
+
+/* --------------------------------------------------------------- store */
+
+/// GET /__store/all -> the whole file store, for the page's boot seed.
+async fn store_all(State(state): State<AppState>) -> Response {
+    Json(state.store.all()).into_response()
+}
+
+/// GET /__store/keys -> just the live index (length/key).
+async fn store_keys(State(state): State<AppState>) -> Response {
+    Json(json!({ "keys": state.store.keys() })).into_response()
+}
+
+#[derive(Deserialize)]
+struct GetQuery {
+    key: String,
+}
+
+/// GET /__store/get?key=... -> { value: string | null }.
+async fn store_get(State(state): State<AppState>, Query(q): Query<GetQuery>) -> Response {
+    Json(json!({ "value": state.store.get(&q.key) })).into_response()
+}
+
+#[derive(Deserialize)]
+struct SetBody {
+    key: String,
+    value: String,
+}
+
+/// POST /__store/set -> writes the file; a non-200 is thrown by the page's
+/// setItem, which is the shell's "quota exceeded" contract.
+async fn store_set(State(state): State<AppState>, Json(body): Json<SetBody>) -> Response {
+    let _guard = state.write_lock.lock().unwrap();
+    match state.store.set(&body.key, &body.value) {
+        Ok(()) => (StatusCode::OK, "ok").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct RemoveBody {
+    key: String,
+}
+
+/// POST /__store/remove -> deletes the file (absent is a no-op).
+async fn store_remove(State(state): State<AppState>, Json(body): Json<RemoveBody>) -> Response {
+    let _guard = state.write_lock.lock().unwrap();
+    match state.store.remove(&body.key) {
+        Ok(()) => (StatusCode::OK, "ok").into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }

@@ -14,6 +14,112 @@
     }
   };
 
+  /* ---- the daggerShell storage bridge --------------------------------
+   *
+   * The page's storage seam speaks localStorage's five words synchronously.
+   * Reads come from the map seeded here; writes go through a synchronous
+   * XHR so a disk failure still throws at the caller, as the Electron
+   * preload's sendSync did. The files are the same ones under userData.
+   */
+  const sync = (method, url, body) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, false);
+    if (body !== undefined) xhr.setRequestHeader('content-type', 'application/json');
+    xhr.send(body);
+    return xhr;
+  };
+
+  let seed = null;
+  try {
+    const response = sync('GET', '/__store/all');
+    if (response.status === 200) seed = JSON.parse(response.responseText);
+  } catch {
+    /* no file store: the page keeps its browser localStorage */
+  }
+
+  if (seed) {
+    const map = new Map(Object.entries(seed.values));
+    let keys = seed.keys.slice();
+    let scanned = performance.now();
+    const indexAdd = (key) => {
+      if (!keys.includes(key)) keys.push(key);
+    };
+    const indexDrop = (key) => {
+      const at = keys.indexOf(key);
+      if (at !== -1) keys.splice(at, 1);
+    };
+    // The shell rescans its index every 2 s so a save copied into an open
+    // Saves folder appears; length() is the only place that pays for it.
+    const refresh = () => {
+      const now = performance.now();
+      if (now - scanned < 2000) return;
+      scanned = now;
+      try {
+        const response = sync('GET', '/__store/keys');
+        if (response.status === 200) keys = JSON.parse(response.responseText).keys;
+      } catch {
+        /* keep the index we have */
+      }
+    };
+
+    window.daggerShell = {
+      platform: 'linux',
+      versions: { app: '', electron: undefined },
+      savesPath: seed.saves_path,
+      relockPointer: () => {},
+      onUpdateReady: () => {},
+      framesLifted: false,
+      gpuTrail: () => {},
+      storage: {
+        length() {
+          refresh();
+          return keys.length;
+        },
+        key(i) {
+          return keys[i] ?? null;
+        },
+        getItem(k) {
+          const key = String(k);
+          if (map.has(key)) return map.get(key);
+          try {
+            const response = sync('GET', '/__store/get?key=' + encodeURIComponent(key));
+            if (response.status !== 200) return null;
+            const value = JSON.parse(response.responseText).value;
+            map.set(key, value);
+            return value;
+          } catch {
+            return null;
+          }
+        },
+        setItem(k, v) {
+          const key = String(k);
+          const value = String(v);
+          const response = sync(
+            'POST',
+            '/__store/set',
+            JSON.stringify({ key, value }),
+          );
+          if (response.status !== 200) {
+            throw new Error(`storage write failed (${response.status}): ${response.responseText}`);
+          }
+          map.set(key, value);
+          indexAdd(key);
+        },
+        removeItem(k) {
+          const key = String(k);
+          const response = sync('POST', '/__store/remove', JSON.stringify({ key }));
+          if (response.status !== 200) {
+            throw new Error(`storage remove failed (${response.status}): ${response.responseText}`);
+          }
+          map.delete(key);
+          indexDrop(key);
+        },
+      },
+    };
+  }
+
+  post('storage', { mode: seed ? 'files' : 'localStorage', keys: seed ? seed.keys.length : 0 });
+
   const glInfo = () => {
     try {
       const canvas = document.createElement('canvas');
