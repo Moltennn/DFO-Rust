@@ -59,6 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         window.present();
     });
 
-    app.run();
+    // GTK's own option parser rejects the shell's flags, which
+    // server::Config::from_args has already consumed; pass it no arguments.
+    app.run_with_args::<&str>(&[]);
     Ok(())
 }
