@@ -127,10 +127,12 @@ or point `DFO_APP` at an `app.asar`.
 `/__dfo` evaluates JavaScript in the page. It binds to 127.0.0.1 only; it is a
 development door, not a security boundary.
 
-Mouse look is scaled to match the desktop game: Wayland hands WebKit raw
-relative motion while Electron on X11 sees the desktop's pointer acceleration.
-The default gain is 2×; `DFO_MOUSE_GAIN` overrides it (`1` keeps the raw
-deltas). **Alt+Enter** toggles fullscreen.
+Mouse look is scaled to match the desktop game with a **linear** factor: on
+the same save, window and hand sweep, Electron reported about 2.5× the raw
+counts WebKitGTK receives under Wayland, so the game turned 2.5× slower here.
+The default gain is 2.5; `DFO_MOUSE_GAIN` overrides it (`1` keeps the raw
+deltas). This is a constant multiplier, not pointer acceleration.
+**Alt+Enter** toggles fullscreen.
 
 ## Measured
 

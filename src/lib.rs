@@ -11,15 +11,16 @@ pub mod store;
 pub const PROBE: &str = include_str!("probe.js");
 
 /// Pointer-lock mouse gain. Under Wayland, WebKit's pointer lock receives raw
-/// relative motion while the desktop game (Electron on X11) sees the
-/// compositor's pointer acceleration, so the same hand motion turns much
-/// slower. `DFO_MOUSE_GAIN` overrides the default; 1 keeps the raw deltas.
+/// relative motion; the same hand sweep in the Electron build produced about
+/// 2.5x the raw counts (a linear scale, not acceleration), so the game looked
+/// 2.5x slower here. `DFO_MOUSE_GAIN` overrides the default; 1 keeps the raw
+/// deltas.
 pub fn mouse_gain() -> f64 {
     std::env::var("DFO_MOUSE_GAIN")
         .ok()
         .and_then(|value| value.trim().parse::<f64>().ok())
         .filter(|value| value.is_finite() && *value > 0.0 && *value <= 8.0)
-        .unwrap_or(2.0)
+        .unwrap_or(2.5)
 }
 
 /// The initialization script handed to the webview: the shell configuration

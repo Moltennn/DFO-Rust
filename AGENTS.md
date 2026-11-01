@@ -132,9 +132,12 @@ The probe makes pointer lock reliable and the mouse feel like the desktop game:
   unlocked);
 - while locked, it forces `cursor: none !important` over the game's custom
   cursor images;
-- it scales locked `movementX`/`movementY` by `DFO_MOUSE_GAIN` (default 2.0),
-  because Wayland relative motion is raw while Electron on X11 sees the
-  compositor's pointer acceleration.
+- it scales locked `movementX`/`movementY` by `DFO_MOUSE_GAIN` (default 2.5),
+  a linear factor. A real-mouse sweep on the same save and window gave
+  Electron ~2.5x the raw counts WebKitGTK gets under Wayland (not pointer
+  acceleration: the KDE device is flat), so 2.5 matches the desktop feel.
+  The probe reads the gain per event, so it can be changed live with
+  `globalThis.__dfoMouseGain = 2` for testing.
 
 **Alt+Enter** fullscreens the window. GTK4 handles it with a capture-phase key
 controller, so the page never sees it and pointer lock stays.

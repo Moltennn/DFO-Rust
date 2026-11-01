@@ -18,28 +18,30 @@
    * pointer acceleration. Scale the locked deltas so the same hand motion
    * turns at the same speed. DFO_MOUSE_GAIN=1 restores raw input.
    */
-  const mouseGain = Number(globalThis.__dfoMouseGain) || 1;
-  if (mouseGain !== 1) {
-    window.addEventListener(
-      'mousemove',
-      (event) => {
-        if (!document.pointerLockElement) return;
-        try {
-          Object.defineProperty(event, 'movementX', {
-            value: event.movementX * mouseGain,
-            configurable: true,
-          });
-          Object.defineProperty(event, 'movementY', {
-            value: event.movementY * mouseGain,
-            configurable: true,
-          });
-        } catch {
-          /* leave the event alone */
-        }
-      },
-      true,
-    );
-  }
+  const mouseGain = () => {
+    const value = Number(globalThis.__dfoMouseGain);
+    return Number.isFinite(value) && value > 0 && value <= 8 ? value : 1;
+  };
+  window.addEventListener(
+    'mousemove',
+    (event) => {
+      const gain = mouseGain();
+      if (gain === 1 || !document.pointerLockElement) return;
+      try {
+        Object.defineProperty(event, 'movementX', {
+          value: event.movementX * gain,
+          configurable: true,
+        });
+        Object.defineProperty(event, 'movementY', {
+          value: event.movementY * gain,
+          configurable: true,
+        });
+      } catch {
+        /* leave the event alone */
+      }
+    },
+    true,
+  );
 
   // Lock on the first click on the game's canvas from here, synchronously in
   // the gesture. The game asks with unadjustedMovement first and retries in a
