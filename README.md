@@ -130,6 +130,15 @@ node tools/enter.mjs
 Both shells share one store and one port; the run scripts refuse to start one
 while the other is up.
 
+**Alt+Enter** toggles fullscreen in both shells. The native shell catches the
+key before the page and fullscreens the window, so pointer lock survives;
+the wry shell takes the page's message and toggles the window itself.
+
+Mouse look is scaled to match the desktop game: Wayland hands WebKit raw
+relative motion, while the Electron game on X11 sees the desktop's pointer
+acceleration. The default gain is 2×; `DFO_MOUSE_GAIN` overrides it (`1` keeps
+the raw deltas).
+
 ## Measured
 
 Test machine: Ryzen 7 5700X3D, Radeon RX 6750 XT, Mesa 26.2.4, Plasma 6 /

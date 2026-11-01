@@ -6,6 +6,89 @@
  * adapter question, so the game's WebGL2 context keeps its own attributes.
  */
 (() => {
+  /* ---- shell-side input fixes -----------------------------------------
+   *
+   * Alt+Enter: the Electron shell's View menu had this accelerator; the page
+   * itself only has the touch button. WebKit's default handler fullscreens
+   * the top-level window when the page asks.
+   *
+   * Movement gain: under Wayland, WebKit's pointer lock receives raw relative
+   * motion, while the desktop game (Electron on X11) sees the compositor's
+   * pointer acceleration. Scale the locked deltas so the same hand motion
+   * turns at the same speed. DFO_MOUSE_GAIN=1 restores raw input.
+   */
+  const mouseGain = Number(globalThis.__dfoMouseGain) || 1;
+  if (mouseGain !== 1) {
+    window.addEventListener(
+      'mousemove',
+      (event) => {
+        if (!document.pointerLockElement) return;
+        try {
+          Object.defineProperty(event, 'movementX', {
+            value: event.movementX * mouseGain,
+            configurable: true,
+          });
+          Object.defineProperty(event, 'movementY', {
+            value: event.movementY * mouseGain,
+            configurable: true,
+          });
+        } catch {
+          /* leave the event alone */
+        }
+      },
+      true,
+    );
+  }
+
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (!event.altKey || (event.key !== 'Enter' && event.code !== 'Enter')) return;
+      event.preventDefault();
+      // The shell owns the window: the GTK4 shell catches Alt+Enter itself;
+      // the wry shell toggles fullscreen on this IPC message. No DOM
+      // fullscreen, so pointer lock survives the switch.
+      post('fullscreen', {});
+    },
+    true,
+  );
+
+  // Lock on the first click on the game's canvas from here, synchronously in
+  // the gesture. The game asks with unadjustedMovement first and retries in a
+  // promise handler; on WebKit that retry can be too late and the first click
+  // silently leaves the game unlocked (visible cursor, no mouse look).
+  window.addEventListener(
+    'mousedown',
+    (event) => {
+      const canvas = event.target;
+      if (!(canvas instanceof HTMLCanvasElement) || document.pointerLockElement) return;
+      try {
+        canvas.requestPointerLock?.();
+      } catch {
+        /* the game's own request remains */
+      }
+    },
+    true,
+  );
+
+  // Keep every CSS cursor (including the game's custom images) off while the
+  // pointer is locked, so a hovered element cannot bring a cursor back.
+  const lockCursorCss = () => {
+    const style = document.createElement('style');
+    style.textContent =
+      'html[data-dfo-locked][data-dfo-locked], html[data-dfo-locked][data-dfo-locked] *{cursor:none !important}';
+    document.head.appendChild(style);
+    const sync = () =>
+      document.documentElement.toggleAttribute(
+        'data-dfo-locked',
+        !!document.pointerLockElement,
+      );
+    document.addEventListener('pointerlockchange', sync);
+    sync();
+  };
+  if (document.head) lockCursorCss();
+  else window.addEventListener('DOMContentLoaded', lockCursorCss, { once: true });
+
   const post = (kind, data) => {
     try {
       window.ipc.postMessage(JSON.stringify({ kind, ...data }));

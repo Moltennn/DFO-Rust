@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build();
 
     let url = CString::new(url)?;
-    let probe = CString::new(dfo_shell::PROBE)?;
+    let probe = CString::new(dfo_shell::initialization_script())?;
     let width = cfg.width as i32;
     let height = cfg.height as i32;
 
@@ -56,6 +56,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let view = unsafe { dfo_webview_new(url.as_ptr(), probe.as_ptr()) };
         let view: gtk4::Widget = unsafe { gtk4::Widget::from_glib_none(view) };
         window.set_child(Some(&view));
+
+        // Alt+Enter toggles the window, in the capture phase so the page never
+        // sees the key (and pointer lock is not disturbed).
+        let keys = gtk4::EventControllerKey::new();
+        keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        let win = window.clone();
+        keys.connect_key_pressed(move |_, keyval, _, state| {
+            if keyval == gtk4::gdk::Key::Return
+                && state.contains(gtk4::gdk::ModifierType::ALT_MASK)
+            {
+                if win.is_fullscreen() {
+                    win.unfullscreen();
+                } else {
+                    win.fullscreen();
+                }
+                return gtk4::glib::Propagation::Stop;
+            }
+            gtk4::glib::Propagation::Proceed
+        });
+        window.add_controller(keys);
+
         window.present();
     });
 

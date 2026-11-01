@@ -7,14 +7,14 @@
  * module preload, fetch). The shell's job is the window and the ARENA2 folder.
  */
 
-use dfo_shell::{placement, server, state_dir, PROBE};
+use dfo_shell::{placement, server, state_dir};
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use tao::dpi::LogicalSize;
 use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoop};
+use tao::event_loop::{ControlFlow, EventLoopBuilder};
 #[cfg(target_os = "linux")]
 use tao::platform::unix::WindowExtUnix;
 use tao::window::WindowBuilder;
@@ -102,7 +102,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("[dfo-shell] loading {url}");
 
-    let event_loop = EventLoop::new();
+    // The page asks for Alt+Enter over IPC; the event loop owns the window and
+    // does the toggle.
+    enum UserEvent {
+        ToggleFullscreen,
+    }
+
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let window = WindowBuilder::new()
         .with_title("DFO Online (Rust shell)")
         .with_inner_size(LogicalSize::new(cfg.width, cfg.height))
@@ -110,14 +116,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let handle: Rc<RefCell<Option<wry::WebView>>> = Rc::new(RefCell::new(None));
     let ipc_handle = handle.clone();
+    let proxy = event_loop.create_proxy();
 
     // The feature toggle must land before the game's document runs, so the
     // page is loaded after the webview exists when the flag is set.
     let start_url: &str = if cfg.no_near_60_fps { "about:blank" } else { &url };
+    let script = dfo_shell::initialization_script();
     let builder = WebViewBuilder::new()
         .with_url(start_url)
         .with_background_color((17, 17, 17, 255))
-        .with_initialization_script(PROBE)
+        .with_initialization_script(&script)
         // The game looks around through pointer lock; WebKitGTK asks the app
         // and, unhandled, keeps the request pending: the cursor stays and the
         // game falls back to its slow unlocked look.
@@ -133,6 +141,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(w) = ipc_handle.borrow().as_ref() {
                         w.open_devtools();
                     }
+                    return;
+                }
+                if kind == "fullscreen" {
+                    let _ = proxy.send_event(UserEvent::ToggleFullscreen);
                     return;
                 }
                 eprintln!("[probe] {body}");
@@ -164,6 +176,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
+        if let Event::UserEvent(UserEvent::ToggleFullscreen) = event {
+            let next = if window.fullscreen().is_some() {
+                None
+            } else {
+                Some(tao::window::Fullscreen::Borderless(None))
+            };
+            window.set_fullscreen(next);
+            return;
+        }
         if let Event::WindowEvent {
             event: WindowEvent::CloseRequested,
             ..

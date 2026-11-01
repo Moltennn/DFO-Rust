@@ -120,6 +120,22 @@ WebKitGTK keeps the request pending if the app does not decide: the cursor
 stays visible and the game, which only looks around under pointer lock, falls
 back to its slow unlocked path.
 
+The probe makes pointer lock reliable and the mouse feel like the desktop game:
+
+- on the first `mousedown` on the game canvas it requests pointer lock itself,
+  synchronously in the gesture; the game's unadjusted request fails and its
+  promise retry can miss the gesture (the first click used to leave the game
+  unlocked);
+- while locked, it forces `cursor: none !important` over the game's custom
+  cursor images;
+- it scales locked `movementX`/`movementY` by `DFO_MOUSE_GAIN` (default 2.0),
+  because Wayland relative motion is raw while Electron on X11 sees the
+  compositor's pointer acceleration.
+
+**Alt+Enter** fullscreens the window. The GTK4 shell handles it with a
+capture-phase key controller (so the page never sees it and pointer lock stays);
+the wry shell toggles its tao window on the probe's `fullscreen` IPC message.
+
 ## Driving the page
 
 `tools/ctl.mjs` queues one JS expression; the injected probe evals it and posts
