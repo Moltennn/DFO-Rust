@@ -17,9 +17,9 @@
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use axum::body::Bytes;
 use axum::extract::{Query, State};
@@ -41,6 +41,7 @@ pub struct Config {
     pub port: u16,
     pub width: f64,
     pub height: f64,
+    pub no_launcher: bool,
     pub serve_only: bool,
 }
 
@@ -56,6 +57,7 @@ impl Config {
             port: 47565,
             width: 1280.0,
             height: 800.0,
+            no_launcher: false,
             serve_only: false,
         };
         let mut args = std::env::args().skip(1);
@@ -86,6 +88,7 @@ impl Config {
                         .expect("bad --height")
                 }
                 "--serve-only" => cfg.serve_only = true,
+                "--no-launcher" => cfg.no_launcher = true,
                 other => panic!("unknown argument: {other}"),
             }
         }
@@ -93,14 +96,60 @@ impl Config {
     }
 }
 
+/// `<userData>/config.json`, the file the Electron shell keeps next to `Prefs/`
+/// and `Saves/`.
+fn config_json_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".config/Daggerfall JavaScript/config.json"))
+}
+
 /// `<userData>/config.json`'s arena2Path, the key the Electron shell keeps.
 fn default_arena2() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let cfg = PathBuf::from(home).join(".config/Daggerfall JavaScript/config.json");
-    let text = std::fs::read_to_string(cfg).ok()?;
+    let text = std::fs::read_to_string(config_json_path()?).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
     json.get("arena2Path")?.as_str().map(PathBuf::from)
 }
+
+/// The ARENA2 folder in `dir`, or in the usual places below it (the player may
+/// pick the Daggerfall install rather than the data folder itself).
+pub fn find_arena2(dir: &Path) -> Option<PathBuf> {
+    let looks = |candidate: &Path| {
+        candidate.join("MAPS.BSA").is_file() && candidate.join("BLOCKS.BSA").is_file()
+    };
+    for candidate in [
+        dir.to_path_buf(),
+        dir.join("ARENA2"),
+        dir.join("DAGGER/ARENA2"),
+        dir.join("DF/DAGGER/ARENA2"),
+    ] {
+        if looks(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Write `arena2Path` back to the shared config, keeping the other keys.
+pub fn save_arena2(dir: &Path) -> std::io::Result<()> {
+    let path = config_json_path().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, "no ~/.config directory")
+    })?;
+    let mut json: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| json!({}));
+    json["arena2Path"] = json!(dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&json)?)?;
+    std::fs::rename(tmp, path)
+}
+
+/// The live ARENA2 path, so the launcher can point the server at a new folder
+/// without a restart.
+pub type Arena2 = Arc<RwLock<Option<PathBuf>>>;
 
 #[derive(Clone, Default)]
 struct Control {
@@ -111,19 +160,23 @@ struct Control {
 
 #[derive(Clone)]
 struct AppState {
-    arena2: Option<PathBuf>,
+    arena2: Arena2,
     control: Control,
     store: Arc<Store>,
     write_lock: Arc<Mutex<()>>,
 }
 
-pub fn spawn(cfg: Config) -> std::io::Result<SocketAddr> {
+/// Start the origin. The returned handle is the live ARENA2 path: write to it
+/// to point the server at another folder.
+pub fn spawn(cfg: Config) -> std::io::Result<(SocketAddr, Arena2)> {
     let port = cfg.port;
+    let arena2: Arena2 = Arc::new(RwLock::new(cfg.arena2.clone()));
+    let shared = Arc::clone(&arena2);
     let (tx, rx) = std::sync::mpsc::channel::<Result<SocketAddr, String>>();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async move {
-            let app = router(cfg);
+            let app = router(cfg, shared);
             let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
                 Ok(listener) => listener,
                 Err(e) => {
@@ -137,16 +190,16 @@ pub fn spawn(cfg: Config) -> std::io::Result<SocketAddr> {
         });
     });
     match rx.recv() {
-        Ok(Ok(addr)) => Ok(addr),
+        Ok(Ok(addr)) => Ok((addr, arena2)),
         Ok(Err(message)) => Err(std::io::Error::new(std::io::ErrorKind::AddrInUse, message)),
         Err(_) => Err(std::io::Error::other("server thread died")),
     }
 }
 
-fn router(cfg: Config) -> Router {
+fn router(cfg: Config, arena2: Arena2) -> Router {
     let files = ServeDir::new(&cfg.root).append_index_html_on_directories(true);
     let state = AppState {
-        arena2: cfg.arena2.clone(),
+        arena2,
         control: Control::default(),
         store: Arc::new(Store::new(crate::store::root())),
         write_lock: Arc::new(Mutex::new(())),
@@ -179,7 +232,7 @@ async fn arena2_file(
     {
         return (StatusCode::BAD_REQUEST, "bad name").into_response();
     }
-    let Some(dir) = state.arena2.as_ref() else {
+    let Some(dir) = state.arena2.read().ok().and_then(|guard| guard.clone()) else {
         return (StatusCode::NOT_FOUND, "no ARENA2 folder").into_response();
     };
     match tokio::fs::read(dir.join(&name)).await {
@@ -274,5 +327,26 @@ async fn store_remove(State(state): State<AppState>, Json(body): Json<RemoveBody
     match state.store.remove(&body.key) {
         Ok(()) => (StatusCode::OK, "ok").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_arena2_in_common_places() {
+        let root = std::env::temp_dir().join(format!("dfo-arena2-test-{}", std::process::id()));
+        let arena = root.join("DF/DAGGER/ARENA2");
+        std::fs::create_dir_all(&arena).unwrap();
+        std::fs::write(arena.join("MAPS.BSA"), b"x").unwrap();
+        std::fs::write(arena.join("BLOCKS.BSA"), b"x").unwrap();
+
+        assert_eq!(find_arena2(&root), Some(arena.clone()));
+        assert_eq!(find_arena2(&arena), Some(arena.clone()));
+        assert_eq!(find_arena2(&root.join("DF/DAGGER")), Some(arena));
+
+        assert_eq!(find_arena2(&root.join("empty")), None);
+        std::fs::remove_dir_all(&root).unwrap();
     }
 }

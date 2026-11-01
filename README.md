@@ -15,7 +15,8 @@ disclaimer. The shell's own code is MIT (see [LICENSE](LICENSE)).
 Status: **working spike.** It runs the current game build offline, serves the
 player's own ARENA2 folder, keeps saves and settings in the same files the
 official shell uses, and reaches the monitor's refresh rate (164 fps measured).
-It has no launcher, updater, menus or crash handling yet.
+It has a small front door (play, game files, saves) but no updater, menus or
+crash handling yet.
 
 ## How it works
 
@@ -96,7 +97,8 @@ node tools/extract-build.mjs        # -> game/dist + game/launcher
 rm -rf vendor
 
 ./tools/build.sh                    # cargo build against the private prefix
-./tools/run.sh
+./tools/run.sh                      # launcher: Play, game files, saves
+# or: ./tools/run.sh --no-launcher   # straight into the game (for the tools below)
 node tools/enter.mjs                # walk to the Test Room and measure
 ./tools/stop.sh
 ```
@@ -109,8 +111,9 @@ wanted.
 the page and prints the answer.
 
 The window takes `--width N --height N`, `--root DIR`, `--arena2 DIR`,
-`--port N`, `--url URL` (load an existing page instead of the local origin) and
-`--serve-only` (the origin without a window).
+`--port N`, `--url URL` (load an existing page instead of the local origin),
+`--no-launcher` (boot straight into the game) and `--serve-only` (the origin
+without a window).
 
 Mouse look is scaled to match the desktop game: Wayland hands WebKit raw
 relative motion while Electron on X11 sees the desktop's pointer acceleration.
@@ -149,14 +152,10 @@ rendering will not hold 60 fps.
 
 ## Known gaps / next steps
 
-1. **The launcher.** The shell boots straight into the game; a front door
-   (play, game files, saves, version) is the next piece.
-2. **ARENA2 detection and the folder picker** (Steam/GOG/DFU settings search) —
-   the official shell's `arena2Detect.cjs` is the reference.
-3. **Display selection.** Frame timing follows the main display rather than the
+1. **Display selection.** Frame timing follows the main display rather than the
    window's output: fine for play there, but a second patch would be needed for
    other outputs.
-4. **Mod loader integration.** The mods patch the served bytes; the shell has to
+2. **Mod loader integration.** The mods patch the served bytes; the shell has to
    serve them instead of `game/dist` for the modded game. The control channel
    is a placeholder for the `dfo` CDP tooling on Linux, which does not exist
    for WebKitGTK.

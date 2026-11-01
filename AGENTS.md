@@ -70,15 +70,24 @@ node tools/extract-build.mjs          # -> game/dist + game/launcher
 rm -rf vendor
 
 ./tools/build.sh                      # cargo build, private WebKit prefix
-./tools/run.sh                        # 1280x800 window, server on :47565
+./tools/run.sh                        # launcher: Play, game files, saves
+# scripted flows:
+./tools/run.sh --no-launcher
 node tools/enter.mjs                  # intro -> Offline -> Test Room -> character
 node tools/ctl.mjs 'document.title'   # any JS expression, printed
 ./tools/stop.sh
 ```
 
+The launcher is the default front door: version from `game/game-seed.json`,
+Play into the game, **Game files...** (picks the ARENA2 folder, validates
+`MAPS.BSA`/`BLOCKS.BSA`, writes `arena2Path` to the shared `config.json` and
+points the running server at it), Open saves, Quit. For the scripted flows
+(`enter.mjs`, `ctl.mjs`, the benchmarks) start with `--no-launcher`.
+
 `tools/run.sh` passes arguments to the shell:
 
 - `--width N --height N` — content size (the comparison used 1280×772)
+- `--no-launcher` — boot straight into `/play/index.html`
 - `--serve-only` — the origin without a window, for pointing a browser at it
 - `--url URL` — load an existing page instead of starting the origin
 - `--root DIR`, `--arena2 DIR`, `--port N`
