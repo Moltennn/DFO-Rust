@@ -21,9 +21,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -41,6 +41,8 @@ pub struct Config {
     pub port: u16,
     pub width: f64,
     pub height: f64,
+    pub mods: Option<PathBuf>,
+    pub proxy: Option<String>,
     pub no_launcher: bool,
     pub serve_only: bool,
 }
@@ -57,6 +59,8 @@ impl Config {
             port: 47565,
             width: 1280.0,
             height: 800.0,
+            mods: std::env::var_os("DFO_MODS_DIR").map(PathBuf::from),
+            proxy: None,
             no_launcher: false,
             serve_only: false,
         };
@@ -87,6 +91,8 @@ impl Config {
                         .parse()
                         .expect("bad --height")
                 }
+                "--mods" => cfg.mods = Some(PathBuf::from(args.next().expect("--mods needs a path"))),
+                "--no-mods" => cfg.mods = None,
                 "--serve-only" => cfg.serve_only = true,
                 "--no-launcher" => cfg.no_launcher = true,
                 other => panic!("unknown argument: {other}"),
@@ -161,6 +167,8 @@ struct Control {
 #[derive(Clone)]
 struct AppState {
     arena2: Arena2,
+    proxy: Option<String>,
+    client: reqwest::Client,
     control: Control,
     store: Arc<Store>,
     write_lock: Arc<Mutex<()>>,
@@ -198,13 +206,19 @@ pub fn spawn(cfg: Config) -> std::io::Result<(SocketAddr, Arena2)> {
 
 fn router(cfg: Config, arena2: Arena2) -> Router {
     let files = ServeDir::new(&cfg.root).append_index_html_on_directories(true);
+    let proxy = cfg.proxy.clone();
     let state = AppState {
         arena2,
+        proxy: proxy.clone(),
+        client: reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("http client"),
         control: Control::default(),
         store: Arc::new(Store::new(crate::store::root())),
         write_lock: Arc::new(Mutex::new(())),
     };
-    Router::new()
+    let router = Router::new()
         .route("/", get(|| async { Redirect::temporary("/play/") }))
         .route("/arena2/{name}", get(arena2_file))
         .route("/play/arena2/{name}", get(arena2_file))
@@ -214,9 +228,70 @@ fn router(cfg: Config, arena2: Arena2) -> Router {
         .route("/__store/keys", get(store_keys))
         .route("/__store/get", get(store_get))
         .route("/__store/set", axum::routing::post(store_set))
-        .route("/__store/remove", axum::routing::post(store_remove))
-        .fallback_service(files)
-        .with_state(state)
+        .route("/__store/remove", axum::routing::post(store_remove));
+    let router = if proxy.is_some() {
+        // Mods mode: the loader answers the game's files, the shell keeps the
+        // store and the control channel.
+        router.fallback(proxy_request)
+    } else {
+        router.fallback_service(files)
+    };
+    router.with_state(state)
+}
+
+/// GET/HEAD everything the loader owns (the game's files, its boot script and
+/// patched chunks) from the DFO-Mods server. Nothing here rewrites the body.
+async fn proxy_request(State(state): State<AppState>, request: Request<Body>) -> Response {
+    let Some(base) = state.proxy.as_deref() else {
+        return (StatusCode::NOT_FOUND, "no upstream").into_response();
+    };
+    if !matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    ) {
+        return (StatusCode::METHOD_NOT_ALLOWED, "read-only upstream").into_response();
+    }
+    let path = request
+        .uri()
+        .path_and_query()
+        .map(|query| query.as_str())
+        .unwrap_or("/");
+    let method = reqwest::Method::from_bytes(request.method().as_str().as_bytes())
+        .unwrap_or(reqwest::Method::GET);
+    let mut builder = state.client.request(method, format!("{base}{path}"));
+    for (name, value) in request.headers() {
+        if matches!(
+            name.as_str(),
+            "host" | "connection" | "content-length" | "transfer-encoding"
+        ) {
+            continue;
+        }
+        builder = builder.header(name.as_str(), value.as_bytes());
+    }
+    let upstream = match builder.send().await {
+        Ok(upstream) => upstream,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("mod loader: {e}")).into_response();
+        }
+    };
+    let status =
+        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let headers: Vec<(axum::http::HeaderName, HeaderValue)> = upstream
+        .headers()
+        .iter()
+        .filter(|(name, _)| !matches!(name.as_str(), "connection" | "transfer-encoding"))
+        .filter_map(|(name, value)| {
+            HeaderValue::from_bytes(value.as_bytes())
+                .ok()
+                .map(|value| (name.clone(), value))
+        })
+        .collect();
+    let mut response = Response::new(Body::from_stream(upstream.bytes_stream()));
+    *response.status_mut() = status;
+    for (name, value) in headers {
+        response.headers_mut().append(name, value);
+    }
+    response
 }
 
 async fn arena2_file(

@@ -2,6 +2,7 @@
 //! and the config/state directory. The GTK4 binary in `src/main.rs` is the
 //! only consumer.
 
+pub mod mods;
 pub mod server;
 pub mod store;
 

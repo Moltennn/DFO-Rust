@@ -115,6 +115,13 @@ The window takes `--width N --height N`, `--root DIR`, `--arena2 DIR`,
 `--no-launcher` (boot straight into the game) and `--serve-only` (the origin
 without a window).
 
+When `../DFO-Mods` is present, `tools/run.sh` starts the mod loader and serves
+the game's files through it (`--no-mods` turns that off, `--mods DIR` picks
+another workspace). The origin, the saves store and the control channel stay
+local. The loader needs the build bundled in the AppImage: extract it in the
+mods workspace once (`./DFO-Online-linux-x86_64.AppImage --appimage-extract`)
+or point `DFO_APP` at an `app.asar`.
+
 Mouse look is scaled to match the desktop game: Wayland hands WebKit raw
 relative motion while Electron on X11 sees the desktop's pointer acceleration.
 The default gain is 2×; `DFO_MOUSE_GAIN` overrides it (`1` keeps the raw
@@ -155,10 +162,8 @@ rendering will not hold 60 fps.
 1. **Display selection.** Frame timing follows the main display rather than the
    window's output: fine for play there, but a second patch would be needed for
    other outputs.
-2. **Mod loader integration.** The mods patch the served bytes; the shell has to
-   serve them instead of `game/dist` for the modded game. The control channel
-   is a placeholder for the `dfo` CDP tooling on Linux, which does not exist
-   for WebKitGTK.
+2. **Frame pacing.** The 165 Hz timing is a timer, not display-synced: the
+   occasional tear is possible and runs vary 162–165 fps.
 
 ## Licensing
 

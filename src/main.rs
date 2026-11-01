@@ -6,14 +6,32 @@ use gtk4::glib::translate::FromGlibPtrNone;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 
-use dfo_shell::{server, state_dir, store};
+use dfo_shell::{mods, server, state_dir, store};
 
 unsafe extern "C" {
     fn dfo_webview_new(url: *const c_char, probe_js: *const c_char) -> *mut gtk4::ffi::GtkWidget;
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cfg = server::Config::from_args();
+    let mut cfg = server::Config::from_args();
+
+    // The loader patches the store's build; the shell keeps the origin so the
+    // store and the control channel stay on the same address.
+    let _mods = match (cfg.external_url.is_none(), cfg.mods.clone()) {
+        (true, Some(dir)) => match mods::start(&dir) {
+            Ok(server) => {
+                eprintln!("[dfo-shell] mods: {} ({})", server.base, dir.display());
+                cfg.proxy = Some(server.base.clone());
+                Some(server)
+            }
+            Err(e) => {
+                eprintln!("[dfo-shell] mods: {e}");
+                eprintln!("[dfo-shell] serving the stock game");
+                None
+            }
+        },
+        _ => None,
+    };
 
     let (url, arena2) = match cfg.external_url.clone() {
         Some(url) => (url, None),

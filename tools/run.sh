@@ -10,6 +10,17 @@ PREFIX="${DFO_WEBKIT_PREFIX:-$HOME/.local/webkitgtk-patched}"
 export LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export PATH="$PREFIX/bin:$PATH"
 
+# Mods by default when the workspace sits beside this repo; --mods/--no-mods/
+# --url say otherwise.
+MODS_DIR="${DFO_MODS_DIR:-../DFO-Mods}"
+want_mods=1
+for arg in "$@"; do
+  case "$arg" in --mods|--no-mods|--url) want_mods=0 ;; esac
+done
+if [ "$want_mods" = 1 ] && [ -d "$MODS_DIR" ]; then
+  set -- --mods "$(cd "$MODS_DIR" && pwd)" "$@"
+fi
+
 if pgrep -x dfo-shell >/dev/null; then
   echo "dfo-shell is already running (close it, or tools/stop.sh)"
   exit 1

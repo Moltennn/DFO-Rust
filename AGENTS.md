@@ -19,6 +19,7 @@ src/lib.rs         shared: origin, store, probe, state dir
 src/main.rs        GTK4 window and app
 src/server.rs      local origin: dist/, ARENA2, /__dfo, /__store
 src/store.rs       file store (Prefs/ + Saves/, the Electron shell's layout)
+src/mods.rs        optional DFO-Mods loader: spawn it, proxy its files
 src/probe.js       injected probe + daggerShell storage bridge
 src/webkit_shim.c  the WebKitGTK 6.0 calls with no usable Rust binding
 build.rs           pkg-config + the shim; warns on the system WebKit
@@ -34,6 +35,7 @@ ${DFO_STATE_DIR:-$HOME/.local/share/dfo-rust}/
   url                 the running shell's base URL (ctl/enter read this)
   shell.pid           run.sh / stop.sh
   shell.log           the shell's stderr/stdout
+  mods.log            the mod loader's output (mods mode)
   backups/store-2026-11-01/    the player's Prefs/ + Saves/ copy taken before
                                the first bridge run (restore by copying back)
   kwin/               transient KWin scripts used to place/focus the Electron
@@ -84,12 +86,28 @@ Play into the game, **Game files...** (picks the ARENA2 folder, validates
 points the running server at it), Open saves, Quit. For the scripted flows
 (`enter.mjs`, `ctl.mjs`, the benchmarks) start with `--no-launcher`.
 
+### Mods
+
+With `--mods DIR` (or `DFO_MODS_DIR`, and by default `../DFO-Mods` in
+`tools/run.sh`), the shell starts `modloader/lib/serve.mjs` in a child and
+proxies every game file to it; `/__store/*` and `/__dfo/*` stay local, so the
+origin (47565), the store and the control channel are unchanged. The loader
+patches the store's build per request; the shell never sees a mod.
+
+The loader needs a readable build. On Linux that is the AppImage the game runs
+from (only while it is mounted) or an `app.asar` named by `DFO_APP`; the shell
+also looks for `squashfs-root/resources/app.asar` in the mods workspace (one
+`--appimage-extract` there). If the loader does not start, the shell logs it
+(`mods.log`) and serves the stock `game/dist`. The child exits on its stdin
+EOF, so killing the shell (even by signal) stops it.
+
 `tools/run.sh` passes arguments to the shell:
 
 - `--width N --height N` — content size (the comparison used 1280×772)
 - `--no-launcher` — boot straight into `/play/index.html`
 - `--serve-only` — the origin without a window, for pointing a browser at it
 - `--url URL` — load an existing page instead of starting the origin
+- `--mods DIR` / `--no-mods` — use the DFO-Mods loader (default: `../DFO-Mods` when it exists)
 - `--root DIR`, `--arena2 DIR`, `--port N`
 
 The port is pinned to 47565 because WebKitGTK keys `localStorage` and
