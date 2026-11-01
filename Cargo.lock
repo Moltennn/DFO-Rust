@@ -369,6 +369,7 @@ dependencies = [
  "tao",
  "tokio",
  "tower-http",
+ "webkit2gtk",
  "wry",
 ]
 

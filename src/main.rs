@@ -22,11 +22,64 @@ use tao::platform::unix::WindowExtUnix;
 use tao::window::WindowBuilder;
 use wry::WebViewBuilder;
 #[cfg(target_os = "linux")]
-use wry::WebViewBuilderExtUnix;
+use wry::{WebViewBuilderExtUnix, WebViewExtUnix};
 
 /* The page-side probe: reports the engine, the GL adapter and the frame rate
  * over the IPC channel, so a run leaves a record of what actually happened. */
 const PROBE: &str = include_str!("probe.js");
+
+/*
+ * WebKitGTK keeps requestAnimationFrame near 60 Hz with a setting that has no
+ * Rust binding in the 2.0 crate (WebKitFeature API, 2.42+). The C symbols are
+ * stable; reach them directly. Identifier and default were read from the
+ * installed library: "PreferPageRenderingUpdatesNear60FPS", default true.
+ */
+#[cfg(target_os = "linux")]
+mod webkit_features {
+    use std::ffi::{c_char, c_int, c_void};
+
+    use webkit2gtk::WebViewExt;
+    use webkit2gtk::glib::object::ObjectType;
+
+    unsafe extern "C" {
+        fn webkit_settings_get_all_features() -> *mut c_void;
+        fn webkit_feature_list_find(list: *mut c_void, identifier: *const c_char) -> *mut c_void;
+        fn webkit_feature_list_unref(list: *mut c_void);
+        fn webkit_settings_set_feature_enabled(
+            settings: *mut c_void,
+            feature: *mut c_void,
+            enabled: c_int,
+        );
+    }
+
+    /// Turn a WebKit feature off by identifier. False when this build has no
+    /// such feature (the list is per-build; never assume one exists).
+    pub fn disable(view: &webkit2gtk::WebView, identifier: &str) -> bool {
+        let Some(settings) = view.settings() else {
+            return false;
+        };
+        let Ok(identifier) = std::ffi::CString::new(identifier) else {
+            return false;
+        };
+        unsafe {
+            let list = webkit_settings_get_all_features();
+            if list.is_null() {
+                return false;
+            }
+            let feature = webkit_feature_list_find(list, identifier.as_ptr());
+            let found = !feature.is_null();
+            if found {
+                webkit_settings_set_feature_enabled(
+                    settings.as_ptr() as *mut c_void,
+                    feature,
+                    0,
+                );
+            }
+            webkit_feature_list_unref(list);
+            found
+        }
+    }
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = server::Config::from_args();
@@ -55,8 +108,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle: Rc<RefCell<Option<wry::WebView>>> = Rc::new(RefCell::new(None));
     let ipc_handle = handle.clone();
 
+    // The feature toggle must land before the game's document runs, so the
+    // page is loaded after the webview exists when the flag is set.
+    let start_url: &str = if cfg.no_near_60_fps { "about:blank" } else { &url };
     let builder = WebViewBuilder::new()
-        .with_url(&url)
+        .with_url(start_url)
         .with_background_color((17, 17, 17, 255))
         .with_initialization_script(PROBE)
         .with_ipc_handler(move |req| {
@@ -80,6 +136,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let webview = builder.build_gtk(window.default_vbox().expect("tao default vbox"))?;
     #[cfg(not(target_os = "linux"))]
     let webview = builder.build(&window)?;
+
+    if cfg.no_near_60_fps {
+        #[cfg(target_os = "linux")]
+        {
+            let found = webkit_features::disable(
+                &webview.webview(),
+                "PreferPageRenderingUpdatesNear60FPS",
+            );
+            eprintln!("[dfo-shell] PreferPageRenderingUpdatesNear60FPS off: {found}");
+        }
+        webview.load_url(&url)?;
+    }
 
     *handle.borrow_mut() = Some(webview);
     placement::start();
