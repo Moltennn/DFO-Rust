@@ -124,18 +124,22 @@ to llvmpipe, the same page will not hold 60 fps.
 
 ### Against Electron, same build and settings
 
-Build 0.1.14473, same store (the player's real `Prefs/` + `Saves/`), same Test
-Room scene, 1280×772 content on the leftmost output (1920×1080 @ 144 Hz):
+Build 0.1.14473, same store (the player's real `Prefs/` + `Saves/`), 1280×772
+content on the leftmost output (1920×1080 @ 144 Hz):
 
-| | Electron 42 | Rust + WebKitGTK |
-|---|---|---|
-| frame rate | 144 fps | **60 fps** (WebKitGTK caps rAF) |
-| median / p95 frame | 6.9 / 7.3 ms | 17 / 18 ms |
-| total RSS | 2.9 GB | 3.64 GB |
+| | Electron 42 | Rust + WebKitGTK | Chromium (Vivaldi app-mode) |
+|---|---|---|---|
+| Test Room fps | 144 | **60** | 144 |
+| Test Room median / p95 | 6.9 / 7.3 ms | 17 / 18 ms | 6.9 / 7.1 ms |
+| Sentinel city fps | — | **59** | **144** |
+| Sentinel median / p95 | — | 17 / 22 ms | 6.9 / 7.1 ms |
+| total RSS (Test Room) | 2.9 GB | 3.64 GB | not measured |
 
-The 60 fps cap is WebKitGTK's, not the page's frame cap: the same page follows
-144 Hz under Chromium on the same output. There is no memory win either; the
-game's heap dominates both. Details in `notes/comparison.md`.
+The Sentinel scene is 64 blocks / 568 draws — the heaviest ordinary city the
+scene router offers. The 60 fps cap is WebKitGTK's, not the page's frame cap:
+the same page follows 144 Hz under Chromium on the same output. There is no
+memory win either; the game's heap dominates both. Details in
+`notes/comparison.md` and `notes/experiment-3.md`.
 
 ## Known gaps / next steps
 

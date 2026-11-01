@@ -31,6 +31,28 @@ content size and the same output.
 | GL adapter | `ANGLE (AMD, Radeon RX 6750 XT, OpenGL ES 3.2)` | reported as `Apple GPU` (WebKitGTK sanitizes); system GL is `radeonsi` |
 | window | 1280×828 outer, DP-1 | 1280×800 outer, DP-1 |
 
+## The city scene
+
+The Test Room is a cave. The same comparison in a full city uses the game's
+scene router — the fastest way to a location without travel:
+
+    /play/index.html?exterior&region=Sentinel&loc=Sentinel&shot&class=0
+
+Sentinel, 64 blocks / 568 draws, 1280×772, focused:
+
+| | WebKitGTK 2.54.1 | Chromium (Vivaldi app-mode) |
+|---|---|---|
+| fps | 59 | **144** |
+| median | 17 ms | 6.9 ms |
+| p95 | 22 ms | 7.1 ms |
+| worst | 83 ms | 7.6 ms |
+
+`?exterior&region=<region>&loc=<loc>` assembles the location from MAPS.BSA;
+`?shot` exposes `window.__playerEntity`; `?class=N` is the headless chargen
+skip. Imperial City is not a MAPS.BSA location ("location not found"), and the
+in-game travel route to it (882 in-game hours) killed the level-1 test
+character. Sentinel is the heaviest ordinary city this route can boot.
+
 ## The two findings that matter
 
 1. **WebKitGTK caps `requestAnimationFrame` at 60 Hz on this machine.** The

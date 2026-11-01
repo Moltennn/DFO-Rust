@@ -62,6 +62,36 @@ WebKit's web view still draws through its own GL path (WebGL/compositing), so
 GTK 3's window keeps the GL frame-clock branch; the GTK bug they cite
 (gtk#8461) is about GL windows never requesting Wayland frame callbacks.
 
+## The heavy scene: Sentinel
+
+The Test Room is a cave. The game's own router boots a full exterior city:
+
+    /play/index.html?exterior&region=Sentinel&loc=Sentinel&shot&class=0
+
+- `?exterior&region=<region>&loc=<loc>` assembles the location from MAPS.BSA
+  (the default is Daggerfall city; `?region`/`?loc` alone are enough).
+- `?shot` exposes `window.__playerEntity` and the other tool hooks.
+- `?class=N` is the headless chargen skip; without it a chargen overlay covers
+  the loaded city.
+
+Sentinel, 64 blocks / 568 draws, 1280×772, focused:
+
+| | WebKitGTK | Chromium (Vivaldi app-mode) |
+|---|---|---|
+| fps | 59 | **144** |
+| median | 17 ms | 6.9 ms |
+| p95 | 22 ms | 7.1 ms |
+| worst | 83 ms | 7.6 ms |
+
+The city's extra draws show as a slightly worse p95 (22 vs 18 ms in the Test
+Room); the 60 Hz clock hides the rest. Chromium has no trouble with it.
+
+Imperial City is not in MAPS.BSA (the travel map lists it under Cyrodiil as a
+custom location): `?exterior&region=Cyrodiil&loc=Imperial City` fails with
+"location not found", and the in-game travel route is 882 in-game hours and
+killed the level-1 test character. Sentinel is a real MAPS.BSA region and the
+heaviest ordinary city reachable this way.
+
 ## What is left
 
 - **GTK4 + WebKitGTK 6.0**: the proper fix (GTK4's frame clock requests
