@@ -17,3 +17,6 @@ wry = { version = "0.57.1", features = ["devtools"], optional = true }
 [features]
 default = ["wry-shell"]
 wry-shell = ["dep:tao", "dep:wry", "dep:webkit2gtk"]
+
+[workspace]
+members = ["gtk4-shell"]
