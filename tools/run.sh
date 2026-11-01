@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Start the shell (one instance, fixed port 47565).
+# Start the shell (one instance, fixed port).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 STATE="${DFO_STATE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/dfo-rust}"
 mkdir -p "$STATE"
+
+PREFIX="${DFO_WEBKIT_PREFIX:-$HOME/.local/webkitgtk-patched}"
+export LD_LIBRARY_PATH="$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PATH="$PREFIX/bin:$PATH"
 
 if pgrep -x dfo-shell >/dev/null; then
   echo "dfo-shell is already running (close it, or tools/stop.sh)"

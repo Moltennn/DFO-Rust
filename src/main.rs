@@ -1,78 +1,12 @@
-/*
- * DFO Online - a Rust shell experiment.
- *
- * One window, one local HTTP server, no Electron. The server exists because
- * the game is already a web app that the mod loader serves over HTTP; using a
- * real origin also sidesteps WebKitGTK's custom-scheme quirks (module workers,
- * module preload, fetch). The shell's job is the window and the ARENA2 folder.
- */
+use std::ffi::{CString, c_char};
 
-use dfo_shell::{placement, server, state_dir};
+use gtk4::glib::translate::FromGlibPtrNone;
+use gtk4::prelude::*;
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use dfo_shell::{server, state_dir};
 
-use tao::dpi::LogicalSize;
-use tao::event::{Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoopBuilder};
-#[cfg(target_os = "linux")]
-use tao::platform::unix::WindowExtUnix;
-use tao::window::WindowBuilder;
-use wry::WebViewBuilder;
-#[cfg(target_os = "linux")]
-use wry::{WebViewBuilderExtUnix, WebViewExtUnix};
-
-/*
- * WebKitGTK keeps requestAnimationFrame near 60 Hz with a setting that has no
- * Rust binding in the 2.0 crate (WebKitFeature API, 2.42+). The C symbols are
- * stable; reach them directly. Identifier and default were read from the
- * installed library: "PreferPageRenderingUpdatesNear60FPS", default true.
- */
-#[cfg(target_os = "linux")]
-mod webkit_features {
-    use std::ffi::{c_char, c_int, c_void};
-
-    use webkit2gtk::WebViewExt;
-    use webkit2gtk::glib::object::ObjectType;
-
-    unsafe extern "C" {
-        fn webkit_settings_get_all_features() -> *mut c_void;
-        fn webkit_feature_list_find(list: *mut c_void, identifier: *const c_char) -> *mut c_void;
-        fn webkit_feature_list_unref(list: *mut c_void);
-        fn webkit_settings_set_feature_enabled(
-            settings: *mut c_void,
-            feature: *mut c_void,
-            enabled: c_int,
-        );
-    }
-
-    /// Turn a WebKit feature off by identifier. False when this build has no
-    /// such feature (the list is per-build; never assume one exists).
-    pub fn disable(view: &webkit2gtk::WebView, identifier: &str) -> bool {
-        let Some(settings) = view.settings() else {
-            return false;
-        };
-        let Ok(identifier) = std::ffi::CString::new(identifier) else {
-            return false;
-        };
-        unsafe {
-            let list = webkit_settings_get_all_features();
-            if list.is_null() {
-                return false;
-            }
-            let feature = webkit_feature_list_find(list, identifier.as_ptr());
-            let found = !feature.is_null();
-            if found {
-                webkit_settings_set_feature_enabled(
-                    settings.as_ptr() as *mut c_void,
-                    feature,
-                    0,
-                );
-            }
-            webkit_feature_list_unref(list);
-            found
-        }
-    }
+unsafe extern "C" {
+    fn dfo_webview_new(url: *const c_char, probe_js: *const c_char) -> *mut gtk4::ffi::GtkWidget;
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -85,112 +19,69 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::io::Error::other(format!("{e} - is another shell already running?"))
             })?;
             let base = format!("http://{addr}");
-            // tools/ctl.mjs finds the running shell here (dev only).
+            // tools/ctl.mjs and tools/enter.mjs find the shell here.
             let state = state_dir();
             let _ = std::fs::create_dir_all(&state);
             let _ = std::fs::write(state.join("url"), &base);
-            eprintln!("[dfo-shell] server {base}");
+            eprintln!("[dfo-shell-gtk4] server {base}");
             format!("{base}/play/index.html")
         }
     };
+
     if cfg.serve_only {
-        eprintln!("[dfo-shell] serving {url} (no window)");
+        eprintln!("[dfo-shell-gtk4] serving {url} (no window)");
         loop {
             std::thread::sleep(std::time::Duration::from_secs(3600));
         }
     }
+    eprintln!("[dfo-shell-gtk4] loading {url}");
 
-    eprintln!("[dfo-shell] loading {url}");
+    let app = gtk4::Application::builder()
+        .application_id("org.moltenn.DfoRust")
+        .build();
 
-    // The page asks for Alt+Enter over IPC; the event loop owns the window and
-    // does the toggle.
-    enum UserEvent {
-        ToggleFullscreen,
-    }
+    let url = CString::new(url)?;
+    let probe = CString::new(dfo_shell::initialization_script())?;
+    let width = cfg.width as i32;
+    let height = cfg.height as i32;
 
-    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
-    let window = WindowBuilder::new()
-        .with_title("DFO Online (Rust shell)")
-        .with_inner_size(LogicalSize::new(cfg.width, cfg.height))
-        .build(&event_loop)?;
+    app.connect_activate(move |app| {
+        let window = gtk4::ApplicationWindow::builder()
+            .application(app)
+            .title("DFO Online (Rust GTK4)")
+            .default_width(width)
+            .default_height(height)
+            .build();
 
-    let handle: Rc<RefCell<Option<wry::WebView>>> = Rc::new(RefCell::new(None));
-    let ipc_handle = handle.clone();
-    let proxy = event_loop.create_proxy();
+        let view = unsafe { dfo_webview_new(url.as_ptr(), probe.as_ptr()) };
+        let view: gtk4::Widget = unsafe { gtk4::Widget::from_glib_none(view) };
+        window.set_child(Some(&view));
 
-    // The feature toggle must land before the game's document runs, so the
-    // page is loaded after the webview exists when the flag is set.
-    let start_url: &str = if cfg.no_near_60_fps { "about:blank" } else { &url };
-    let script = dfo_shell::initialization_script();
-    let builder = WebViewBuilder::new()
-        .with_url(start_url)
-        .with_background_color((17, 17, 17, 255))
-        .with_initialization_script(&script)
-        // The game looks around through pointer lock; WebKitGTK asks the app
-        // and, unhandled, keeps the request pending: the cursor stays and the
-        // game falls back to its slow unlocked look.
-        .with_permission_handler(|kind| match kind {
-            wry::PermissionKind::PointerLock => wry::PermissionResponse::Allow,
-            _ => wry::PermissionResponse::Default,
-        })
-        .with_ipc_handler(move |req| {
-            let body = String::from_utf8_lossy(req.body().as_bytes());
-            if let Ok(ev) = serde_json::from_str::<serde_json::Value>(&body) {
-                let kind = ev.get("kind").and_then(|k| k.as_str()).unwrap_or("?");
-                if kind == "devtools" {
-                    if let Some(w) = ipc_handle.borrow().as_ref() {
-                        w.open_devtools();
-                    }
-                    return;
+        // Alt+Enter toggles the window, in the capture phase so the page never
+        // sees the key (and pointer lock is not disturbed).
+        let keys = gtk4::EventControllerKey::new();
+        keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        let win = window.clone();
+        keys.connect_key_pressed(move |_, keyval, _, state| {
+            if keyval == gtk4::gdk::Key::Return
+                && state.contains(gtk4::gdk::ModifierType::ALT_MASK)
+            {
+                if win.is_fullscreen() {
+                    win.unfullscreen();
+                } else {
+                    win.fullscreen();
                 }
-                if kind == "fullscreen" {
-                    let _ = proxy.send_event(UserEvent::ToggleFullscreen);
-                    return;
-                }
-                eprintln!("[probe] {body}");
+                return gtk4::glib::Propagation::Stop;
             }
+            gtk4::glib::Propagation::Proceed
         });
+        window.add_controller(keys);
 
-    // Linux + Wayland: a WebView must be built into the GTK widget, not from a
-    // raw window handle (wry's UnsupportedWindowHandle). tao's window already
-    // holds a GtkBox; the webview goes in that, or GTK refuses the second child.
-    #[cfg(target_os = "linux")]
-    let webview = builder.build_gtk(window.default_vbox().expect("tao default vbox"))?;
-    #[cfg(not(target_os = "linux"))]
-    let webview = builder.build(&window)?;
-
-    if cfg.no_near_60_fps {
-        #[cfg(target_os = "linux")]
-        {
-            let found = webkit_features::disable(
-                &webview.webview(),
-                "PreferPageRenderingUpdatesNear60FPS",
-            );
-            eprintln!("[dfo-shell] PreferPageRenderingUpdatesNear60FPS off: {found}");
-        }
-        webview.load_url(&url)?;
-    }
-
-    *handle.borrow_mut() = Some(webview);
-    placement::start();
-
-    event_loop.run(move |event, _, control_flow| {
-        *control_flow = ControlFlow::Wait;
-        if let Event::UserEvent(UserEvent::ToggleFullscreen) = event {
-            let next = if window.fullscreen().is_some() {
-                None
-            } else {
-                Some(tao::window::Fullscreen::Borderless(None))
-            };
-            window.set_fullscreen(next);
-            return;
-        }
-        if let Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } = event
-        {
-            *control_flow = ControlFlow::Exit;
-        }
+        window.present();
     });
+
+    // GTK's own option parser rejects the shell's flags, which
+    // server::Config::from_args has already consumed; pass it no arguments.
+    app.run_with_args::<&str>(&[]);
+    Ok(())
 }

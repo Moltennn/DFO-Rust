@@ -15,15 +15,15 @@ game over CDP; this shell has no CDP and uses its own control channel.
 Repository:
 
 ```
-src/lib.rs         shared: origin, store, placement, probe, state dir
-src/main.rs        wry/GTK3 window (default "wry-shell" feature)
+src/lib.rs         shared: origin, store, probe, state dir
+src/main.rs        GTK4 window and app
 src/server.rs      local origin: dist/, ARENA2, /__dfo, /__store
 src/store.rs       file store (Prefs/ + Saves/, the Electron shell's layout)
-src/placement.rs   KWin output placement (sendClientToScreen)
 src/probe.js       injected probe + daggerShell storage bridge
-gtk4-shell/        native GTK4 + WebKitGTK 6.0 binary and its C shim
-tools/             extract-build.mjs, run.sh, run-native.sh, stop.sh, ctl.mjs,
-                   enter.mjs, build-native.sh, state.mjs (state dir)
+src/webkit_shim.c  the WebKitGTK 6.0 calls with no usable Rust binding
+build.rs           pkg-config + the shim; warns on the system WebKit
+tools/             extract-build.mjs, build.sh, run.sh, stop.sh, ctl.mjs,
+                   enter.mjs, state.mjs (the one definition of the state dir)
 notes/             experiments 1-2 and the native spike
 ```
 
@@ -34,8 +34,6 @@ ${DFO_STATE_DIR:-$HOME/.local/share/dfo-rust}/
   url                 the running shell's base URL (ctl/enter read this)
   shell.pid           run.sh / stop.sh
   shell.log           the shell's stderr/stdout
-  shell-native.pid    run-native.sh / stop.sh
-  shell-native.log    the GTK4 shell's stderr/stdout
   backups/store-2026-11-01/    the player's Prefs/ + Saves/ copy taken before
                                the first bridge run (restore by copying back)
   kwin/               transient KWin scripts used to place/focus the Electron
@@ -46,14 +44,13 @@ ${DFO_STATE_DIR:-$HOME/.local/share/dfo-rust}/
 ```
 
 `DFO_STATE_DIR` overrides the directory; `XDG_DATA_HOME` is respected.
-`/tmp` is only used by `src/placement.rs` for the KWin script it writes,
-loads and removes.
 
-The native GTK4 shell links a **private** patched WebKitGTK 6.0, never the
-system one: `~/.local/webkitgtk-patched` (`DFO_WEBKIT_PREFIX` overrides; the
-source, patch and scripts are in `$STATE/webkit-patched/`). The wry binary
-keeps using the system `webkit2gtk-4.1`; never link both GTK versions into one
-process.
+The shell links a **private** patched WebKitGTK 6.0, never the system one:
+`~/.local/webkitgtk-patched` (`DFO_WEBKIT_PREFIX` overrides; the source,
+patch and scripts are in `$STATE/webkit-patched/`). `tools/build.sh` points
+pkg-config at it; `tools/run.sh` sets `LD_LIBRARY_PATH`. A plain `cargo build`
+warns because it picks the system library and runs at 60 fps
+(`DFO_ALLOW_SYSTEM_WEBKIT=1` silences it).
 
 `game/` (the extracted build) and `vendor/` (an asar extraction) are
 git-ignored. Never commit game data, ARENA2, saves or screenshots of the
@@ -61,7 +58,8 @@ player's data to the repository.
 
 ## Run
 
-Requirements: Rust, `webkit2gtk-4.1`, GTK3. The player's ARENA2 path comes from
+Requirements: Rust, GTK4, and the private patched WebKitGTK 6.0 (built once,
+`notes/native-webkit-patch.md`). The player's ARENA2 path comes from
 `~/.config/Daggerfall JavaScript/config.json` (`arena2Path`) or `--arena2`.
 
 ```bash
@@ -71,7 +69,7 @@ mkdir -p vendor && (cd vendor && /path/DFO-Online-linux-x86_64.AppImage \
 node tools/extract-build.mjs          # -> game/dist + game/launcher
 rm -rf vendor
 
-cargo build
+./tools/build.sh                      # cargo build, private WebKit prefix
 ./tools/run.sh                        # 1280x800 window, server on :47565
 node tools/enter.mjs                  # intro -> Offline -> Test Room -> character
 node tools/ctl.mjs 'document.title'   # any JS expression, printed
@@ -81,8 +79,6 @@ node tools/ctl.mjs 'document.title'   # any JS expression, printed
 `tools/run.sh` passes arguments to the shell:
 
 - `--width N --height N` — content size (the comparison used 1280×772)
-- `--no-near-60-fps` — turn off WebKit's near-60 preference (a knob; it does
-  not lift the cap on GTK3)
 - `--serve-only` — the origin without a window, for pointing a browser at it
 - `--url URL` — load an existing page instead of starting the origin
 - `--root DIR`, `--arena2 DIR`, `--port N`
@@ -90,35 +86,16 @@ node tools/ctl.mjs 'document.title'   # any JS expression, printed
 The port is pinned to 47565 because WebKitGTK keys `localStorage` and
 IndexedDB by origin, and an origin includes the port.
 
-### Native GTK4 route
+The window opens on the active KWin output; WebKit's frame timing follows the
+main display (DP-3 here), so that is the output where the 164 fps numbers come
+from. The near-60 feature is always disabled in the C shim (6.0 has no
+`webkit_web_view_new_with_settings`, so the settings are applied to a fresh
+view before the first load).
 
-`gtk4-shell` is the second binary: same game, same origin, same store, but a
-GTK4 window on WebKitGTK 6.0 from the private patched WebKit. It exists because
-GTK3 cannot go past 59 Hz; this one holds the monitor's rate.
-
-```bash
-./tools/build-native.sh   # PKG_CONFIG_PATH -> ~/.local/webkitgtk-patched
-./tools/run-native.sh     # LD_LIBRARY_PATH  -> same prefix
-node tools/enter.mjs
-node tools/ctl.mjs 'document.title'
-./tools/stop.sh
-```
-
-It accepts the same flags (`--serve-only`, `--url`, `--root`, `--arena2`,
-`--port`, `--width/--height`). The near-60 feature is always disabled in the
-C shim (6.0 has no `webkit_web_view_new_with_settings`, so the settings are
-applied to a fresh view before the first load).
-
-Both shells write `$STATE/url`, and `run.sh` / `run-native.sh` refuse to start
-while the other is running: one store, one origin. The window opens on the
-active KWin output; WebKit's display link follows the main display (DP-3 here),
-so that is the output where the 165 fps numbers come from.
-
-Both shells allow WebKit's **pointer-lock** permission request (wry:
-`with_permission_handler`; GTK4: the shim's `permission-request` handler).
-WebKitGTK keeps the request pending if the app does not decide: the cursor
-stays visible and the game, which only looks around under pointer lock, falls
-back to its slow unlocked path.
+The shim allows WebKit's **pointer-lock** permission request
+(`permission-request`). WebKitGTK keeps the request pending if the app does not
+decide: the cursor stays visible and the game, which only looks around under
+pointer lock, falls back to its slow unlocked path.
 
 The probe makes pointer lock reliable and the mouse feel like the desktop game:
 
@@ -132,9 +109,8 @@ The probe makes pointer lock reliable and the mouse feel like the desktop game:
   because Wayland relative motion is raw while Electron on X11 sees the
   compositor's pointer acceleration.
 
-**Alt+Enter** fullscreens the window. The GTK4 shell handles it with a
-capture-phase key controller (so the page never sees it and pointer lock stays);
-the wry shell toggles its tao window on the probe's `fullscreen` IPC message.
+**Alt+Enter** fullscreens the window. GTK4 handles it with a capture-phase key
+controller, so the page never sees it and pointer lock stays.
 
 ## Driving the page
 
@@ -164,9 +140,8 @@ The game's own scene router is the teleport for locations:
 ## The 60 Hz cap
 
 The stock engine limits the page to about 60 fps, independent of the display.
-GTK3's frame clock is 16667 µs (59 Hz); GTK4 with WebKitGTK 6.0 has a 144 Hz
-clock and the near-60 feature off, yet the page still measures ~62 fps
-(`tools/gtk4-raf.py`).
+GTK4 with WebKitGTK 6.0 has a 144 Hz frame clock and the near-60 feature off,
+yet the page still measures ~62 fps (`tools/gtk4-raf.py`).
 
 The cause is WebKitGTK's frame timing. It takes the rate from a DRM vblank
 monitor; that monitor is unavailable to a Wayland client that is not the DRM
@@ -178,8 +153,11 @@ settings do not change it.
 
 The fix is a small patch to that fallback: pass the monitor's refresh rate to
 the timer. `notes/native-webkit-patch.md` has the patch, the private build
-(`~/.local/webkitgtk-patched`) and the caveats. With it, `gtk4-shell/` runs
-Sentinel at **165 fps, mean 6.07 ms** on DP-3.
+(`~/.local/webkitgtk-patched`) and the caveats. With it, the shell runs
+Sentinel at **164 fps, mean 6.1 ms** on DP-3.
+
+The like-for-like numbers (Sentinel, 1280×772, DP-3 @ 165, mean of three 5 s
+runs): official Electron **165 fps / 6.06 ms**, this shell **164 / 6.1 ms**.
 
 One caveat remains: the page's frame timing follows the first display it sees
 (DP-3, the main display here), not the window's output, and moving the window
@@ -189,9 +167,9 @@ possible even at the right rate.
 
 ## Comparing against Electron
 
-Both need a free store (do not run two shells against it at once) and the same
-build. The current build is the installed AppImage's `app.asar` (0.1.14473 at
-the time of writing); re-extract after a launcher update.
+Both read one store (do not run them against it at once) and the same build.
+The current build is the installed AppImage's `app.asar` (0.1.14473 at the time
+of writing); re-extract after a launcher update.
 
 Electron (stock, no mods, no `DAGGER_DEV_URL`):
 

@@ -1,7 +1,7 @@
-//! Shared shell pieces: the local origin, the file store, KWin placement and
-//! the page probe. The wry/GTK3 binary and the native GTK4 shell both use them.
+//! The shell's shared pieces: the local origin, the file store, the page probe
+//! and the config/state directory. The GTK4 binary in `src/main.rs` is the
+//! only consumer.
 
-pub mod placement;
 pub mod server;
 pub mod store;
 
