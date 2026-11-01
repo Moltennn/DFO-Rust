@@ -7,9 +7,7 @@
  * module preload, fetch). The shell's job is the window and the ARENA2 folder.
  */
 
-mod placement;
-mod server;
-mod store;
+use dfo_shell::{placement, server, state_dir, PROBE};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -23,24 +21,6 @@ use tao::window::WindowBuilder;
 use wry::WebViewBuilder;
 #[cfg(target_os = "linux")]
 use wry::{WebViewBuilderExtUnix, WebViewExtUnix};
-
-/* The page-side probe: reports the engine, the GL adapter and the frame rate
- * over the IPC channel, so a run leaves a record of what actually happened. */
-const PROBE: &str = include_str!("probe.js");
-
-/// The shell's local state: the URL tools/ctl.mjs reads, and the pid/log
-/// tools/run.sh keeps. Outside the repository and outside /tmp, so a restart
-/// or a reboot does not lose it. Override with DFO_STATE_DIR.
-fn state_dir() -> std::path::PathBuf {
-    if let Some(dir) = std::env::var_os("DFO_STATE_DIR") {
-        return dir.into();
-    }
-    let home = std::env::var_os("HOME").unwrap_or_default();
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(home).join(".local/share"));
-    base.join("dfo-rust")
-}
 
 /*
  * WebKitGTK keeps requestAnimationFrame near 60 Hz with a setting that has no
