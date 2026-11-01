@@ -75,3 +75,32 @@ The shell must move to **GTK4** (wry/tao are GTK3-only):
   upstream patch. A patched system library is not shippable.
 
 If the probe does not reach 144, stop before the shell work.
+
+## Result (2.54.2, private build)
+
+The build and install succeeded, and the fallback patch works: a debug log
+shows the display link creating
+
+    DFO vblank displayID=1 model=VG248      refresh=144001
+    DFO vblank displayID=2 model=Odyssey G50A refresh=164836
+
+— no 60 Hz fallback, the throttle test no longer says "refresh rate 60fps".
+
+But the native 144-on-DP-1 case exposed a **second WebKitGTK issue**: the
+page's display link stays on displayID 2 (DP-3, 165) even when the window is on
+DP-1 (GTK frame clock 6944 µs / 144 Hz), DP-1 is primary, and the window opened
+on DP-1. ScreenManager knows displayID 1 is the VG248 at 144 Hz; the page/link
+does not switch to it. Moving the window later does not update the link.
+
+So the 60 Hz cap is fixed, but the display selection is not: `rAF` follows the
+page's initial display (DP-3), not the window's output. Options:
+
+- a second WebKit patch to switch/refresh the page display link on
+  `windowScreenDidChange` (page/display-link plumbing; more research);
+- place the window at creation on the link's display (DP-3), or run that
+  display at 144 Hz — not the leftmost DP-1;
+- Firefox/Chromium for the 144 fps DP-1 client;
+- stop the native route here.
+
+The timer is also not vblank-synced, so the link at 165 on a 144 Hz window
+would drop/tear; matching the link to the window is essential, not cosmetic.

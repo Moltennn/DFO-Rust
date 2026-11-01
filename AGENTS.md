@@ -136,8 +136,10 @@ it needs a WebKitGTK rebuild.
 
 The native spike lives in `notes/native-webkit-patch.md`: patch WebKitGTK's
 display-link timer fallback, build it privately, and test with
-`$STATE/webkit-patched/run-probe.sh`. If it reaches 144, the shell ports to
-GTK4; if not, the native route stops there.
+`$STATE/webkit-patched/run-probe.sh`. The fallback is fixed (no more 60), but
+the page's display link follows its initial display (DP-3/165) rather than the
+window's DP-1/144; a second display-link selection patch is needed before the
+GTK4 shell is worth starting.
 
 ## Comparing against Electron and Chromium
 
