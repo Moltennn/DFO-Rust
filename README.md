@@ -65,14 +65,17 @@ result the modding tools' `dfo place DP-1` gets with xdotool on XWayland.
 ## Layout
 
 ```
-src/main.rs        the window, the probe, the IPC handler
+src/lib.rs         shared: origin, store, placement, probe, state dir
+src/main.rs        the wry/GTK3 window (default feature)
 src/server.rs      the local origin: dist/, arena2/, __store/, __dfo/
 src/store.rs       the file store (Prefs/ + Saves/, same layout as Electron)
 src/placement.rs   KWin: send the window to an output (Wayland)
 src/probe.js       injected page probe + the daggerShell storage bridge
+gtk4-shell/        native GTK4 + WebKitGTK 6.0 shell and its C shim
 tools/extract-build.mjs   app.asar -> plain game/dist + launcher/
-tools/run.sh       start (one instance, fixed port)
-tools/stop.sh      stop
+tools/run.sh       start the wry shell (one instance, fixed port)
+tools/run-native.sh       start the GTK4 shell (private patched WebKit)
+tools/stop.sh      stop either shell
 tools/enter.mjs    intro -> Offline -> Test Room -> a character, then measure
 tools/ctl.mjs      evaluate one expression in the page, print the answer
 tools/state.mjs    the one definition of the local state dir
@@ -107,6 +110,24 @@ node tools/enter.mjs        # walk to the Test Room and measure
 `node tools/ctl.mjs 'document.title'` is the inspection door: it queues a JS
 expression that the page evaluates and answers. It exists because driving the
 UI with `xdotool` moves the real cursor; this does not touch it.
+
+### The native GTK4 route (144+ fps)
+
+The wry shell is GTK3, and GTK3's frame clock is 59 Hz. `gtk4-shell` is the
+same shell on GTK4 + WebKitGTK 6.0, linked against a **private** patched
+WebKitGTK (2.54.2) whose display-link timer takes the monitor's refresh instead
+of a hard-coded 60. The system WebKit is untouched; the patch, build and caveats
+are in `notes/native-webkit-patch.md`.
+
+```bash
+./tools/build-native.sh   # PKG_CONFIG_PATH -> ~/.local/webkitgtk-patched
+./tools/run-native.sh     # LD_LIBRARY_PATH  -> the same prefix
+node tools/enter.mjs
+./tools/stop.sh
+```
+
+The two shells share one store and one origin; the run scripts refuse to start
+one while the other is up.
 
 ## What has been measured
 
@@ -157,6 +178,26 @@ the same Sentinel scene. There is no memory win either; the game's heap
 dominates both. Details in `notes/comparison.md` and
 `notes/experiment-3.md`.
 
+### The native GTK4 shell (patched WebKitGTK)
+
+`gtk4-shell` with the private patched WebKitGTK 2.54.2, on the main output
+(DP-3, 2560×1440 @ 165 Hz, 1280×800 content):
+
+| | |
+|---|---|
+| Sentinel city fps | **165** |
+| Sentinel mean / worst frame | 6.07 / 13 ms |
+| GTK4 frame clock | 6067 µs |
+| Test Room (948 draws) | ~144–154, CPU-bound |
+| storage bridge | `daggerShell.storage` round trip verified against the real store |
+
+The display link follows the display the page first sees (DP-3, the main
+display) rather than the window's output: a window on DP-1 still gets the
+165 Hz link while its GTK clock is 144, and moving it does not repoint the
+link. That is fine while the game is played on DP-3; see
+`notes/native-webkit-patch.md`. The fallback is a timer, not vblank-synced, so
+tearing/jitter is possible even at the right rate.
+
 ## Known gaps / next steps
 
 1. **Single instance.** The pinned port already refuses a second shell
@@ -166,9 +207,12 @@ dominates both. Details in `notes/comparison.md` and
 3. **ARENA2 detection and the folder picker** (Steam/GOG/DFU settings search) —
    the Electron shell's `arena2Detect.cjs` is the reference.
 4. **The 144 fps question is settled for the native stack.** Sentinel was
-   measured (64 blocks / 568 draws); GTK4 + WebKitGTK 6.0 was tested and also
-   holds rAF at ~62 fps. The remaining 144 fps route is Chromium (app-mode or
-   CEF), or accept 60 fps and keep the small native shell.
+   measured at 165 fps on DP-3 with `gtk4-shell` and the private patched
+   WebKitGTK 6.0; the stock WebKit (wry/GTK3 or GTK4) is capped at ~60 by its
+   display-link timer. The remaining native work is packaging the patched
+   WebKit (~150 MB) and, for DP-1 at 144, a second display-link selection
+   patch. Chromium app-mode stays an alternative if a browser dependency is
+   acceptable.
 5. **Mod loader integration.** The mods patch the served bytes; a shell that
    serves `game/dist` can apply the same view/overlay before responding.
    The control channel is a placeholder for the `dfo` CDP tooling on Linux,

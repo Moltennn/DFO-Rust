@@ -15,14 +15,16 @@ game over CDP; this shell has no CDP and uses its own control channel.
 Repository:
 
 ```
-src/main.rs        window, probe injection, state dir, --no-near-60-fps
+src/lib.rs         shared: origin, store, placement, probe, state dir
+src/main.rs        wry/GTK3 window (default "wry-shell" feature)
 src/server.rs      local origin: dist/, ARENA2, /__dfo, /__store
 src/store.rs       file store (Prefs/ + Saves/, the Electron shell's layout)
 src/placement.rs   KWin output placement (sendClientToScreen)
 src/probe.js       injected probe + daggerShell storage bridge
-tools/             extract-build.mjs, run.sh, stop.sh, ctl.mjs, enter.mjs,
-                   state.mjs (the one definition of the state dir)
-notes/             experiments 1-3 and the Electron comparison
+gtk4-shell/        native GTK4 + WebKitGTK 6.0 binary and its C shim
+tools/             extract-build.mjs, run.sh, run-native.sh, stop.sh, ctl.mjs,
+                   enter.mjs, build-native.sh, state.mjs (state dir)
+notes/             experiments 1-3, the Electron comparison, the native spike
 ```
 
 Local state and tooling, **outside the repo and outside `/tmp`**:
@@ -32,6 +34,8 @@ ${DFO_STATE_DIR:-$HOME/.local/share/dfo-rust}/
   url                 the running shell's base URL (ctl/enter read this)
   shell.pid           run.sh / stop.sh
   shell.log           the shell's stderr/stdout
+  shell-native.pid    run-native.sh / stop.sh
+  shell-native.log    the GTK4 shell's stderr/stdout
   backups/store-2026-11-01/    the player's Prefs/ + Saves/ copy taken before
                                the first bridge run (restore by copying back)
   kwin/               transient KWin scripts used to place/focus Electron and
@@ -44,6 +48,12 @@ ${DFO_STATE_DIR:-$HOME/.local/share/dfo-rust}/
 `DFO_STATE_DIR` overrides the directory; `XDG_DATA_HOME` is respected.
 `/tmp` is only used by `src/placement.rs` for the KWin script it writes,
 loads and removes.
+
+The native GTK4 shell links a **private** patched WebKitGTK 6.0, never the
+system one: `~/.local/webkitgtk-patched` (`DFO_WEBKIT_PREFIX` overrides; the
+source, patch and scripts are in `$STATE/webkit-patched/`). The wry binary
+keeps using the system `webkit2gtk-4.1`; never link both GTK versions into one
+process.
 
 `game/` (the extracted build) and `vendor/` (an asar extraction) are
 git-ignored. Never commit game data, ARENA2, saves or screenshots of the
@@ -80,6 +90,30 @@ node tools/ctl.mjs 'document.title'   # any JS expression, printed
 The port is pinned to 47565 because WebKitGTK keys `localStorage` and
 IndexedDB by origin, and an origin includes the port.
 
+### Native GTK4 route
+
+`gtk4-shell` is the second binary: same game, same origin, same store, but a
+GTK4 window on WebKitGTK 6.0 from the private patched WebKit. It exists because
+GTK3 cannot go past 59 Hz; this one holds the monitor's rate.
+
+```bash
+./tools/build-native.sh   # PKG_CONFIG_PATH -> ~/.local/webkitgtk-patched
+./tools/run-native.sh     # LD_LIBRARY_PATH  -> same prefix
+node tools/enter.mjs
+node tools/ctl.mjs 'document.title'
+./tools/stop.sh
+```
+
+It accepts the same flags (`--serve-only`, `--url`, `--root`, `--arena2`,
+`--port`, `--width/--height`). The near-60 feature is always disabled in the
+C shim (6.0 has no `webkit_web_view_new_with_settings`, so the settings are
+applied to a fresh view before the first load).
+
+Both shells write `$STATE/url`, and `run.sh` / `run-native.sh` refuse to start
+while the other is running: one store, one origin. The window opens on the
+active KWin output; WebKit's display link follows the main display (DP-3 here),
+so that is the output where the 165 fps numbers come from.
+
 ## Driving the page
 
 `tools/ctl.mjs` queues one JS expression; the injected probe evals it and posts
@@ -113,19 +147,19 @@ WebKit `PreferPageRenderingUpdatesNear60FPS` feature and `GDK_GL=disable`
 same page in Chromium (Vivaldi app-mode) is 144 fps. `notes/experiment-3.md`
 has the matrix.
 
-**GTK4 + WebKitGTK 6.0 was tested too** (2.54.2, after the full system update,
+**GTK4 + WebKitGTK 6.0 with the stock library was tested too** (2.54.2,
 `tools/gtk4-raf.py`): the GTK4 frame clock is 6944 µs (144 Hz), the near-60
 feature is off at web-process construction, the window is focused and visible,
-and rAF is still ~62 fps / 16 ms. The cap is in WebKitGTK's animation
-scheduling, not GTK's frame clock, so the native 144 fps route is closed.
+and rAF is still ~62 fps / 16 ms. Setting GTK4 aside, the cap is WebKitGTK's
+GLib display-link timer fallback, which is what the native patch replaces.
 
 Output refresh and VSync are not the cause either: 144 Hz (DP-1) and 165 Hz
 (DP-3) outputs both give ~62 fps while the GTK clock is 6944/6067 µs;
 `vblank_mode=0`, XWayland and `WEBKIT_DISABLE_COMPOSITING_MODE=1` are all ~62.
 Chromium with `--disable-gpu-vsync --disable-frame-rate-limit` reaches
-**243 fps** in the same Sentinel scene. Remaining: Chromium app-mode (144
-today, tiny, but a browser dependency), CEF (bundled Chromium), or accept 60
-fps.
+**243 fps** in the same Sentinel scene. The remaining non-native options are
+Chromium app-mode (144, but a browser dependency) or CEF (bundled Chromium);
+the native option is the patched WebKit below.
 
 The root of it: WebKitGTK's GLib `DisplayLink` takes its rate from a DRM
 vblank monitor; that monitor is unavailable here, so it falls back to
@@ -134,12 +168,20 @@ is rejected with "refresh rate 60fps" while the GTK clock is 144). A patch to
 the fallback (use the monitor's refresh) plus a GTK4 shell is the native fix;
 it needs a WebKitGTK rebuild.
 
-The native spike lives in `notes/native-webkit-patch.md`: patch WebKitGTK's
-display-link timer fallback, build it privately, and test with
-`$STATE/webkit-patched/run-probe.sh`. The fallback is fixed (no more 60), but
-the page's display link follows its initial display (DP-3/165) rather than the
-window's DP-1/144; a second display-link selection patch is needed before the
-GTK4 shell is worth starting.
+The native fix is built and works: `notes/native-webkit-patch.md` has the
+patch, the private build and the second issue. The patched WebKitGTK 2.54.2
+(GTK4, `~/.local/webkitgtk-patched`) makes `DisplayVBlankMonitorTimer` take the
+monitor's refresh, and `gtk4-shell/` runs the game on it: on DP-3 / 165 Hz,
+Sentinel (64 blocks / 568 draws) holds **165 fps, mean 6.07 ms**, with a
+6067 µs GTK4 frame clock.
+
+One caveat remains: the page's display link follows the display it first sees
+(DP-3, the main display) rather than the window's output. A window on DP-1
+still gets the 165 Hz link while its GTK clock is 144, and moving the window
+does not repoint it. That is acceptable while the game is played on DP-3; a
+second display-link selection patch would be needed otherwise. The fallback is
+also a timer, not vblank-synced, so tearing/jitter is possible even at the
+right rate.
 
 ## Comparing against Electron and Chromium
 

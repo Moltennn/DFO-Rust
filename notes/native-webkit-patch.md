@@ -104,3 +104,10 @@ page's initial display (DP-3), not the window's output. Options:
 
 The timer is also not vblank-synced, so the link at 165 on a 144 Hz window
 would drop/tear; matching the link to the window is essential, not cosmetic.
+
+## The shell
+
+`gtk4-shell` (see `notes/native-gtk4-shell.md`) is built on this prefix. On
+DP-3 / 165 Hz, Sentinel (64 blocks / 568 draws) holds **165 fps, mean 6.07 ms**.
+The debug logging used to find the display selection has been removed from the
+installed build; the patch in `notes/native/` is the clean version.
