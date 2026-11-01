@@ -1,10 +1,18 @@
 # DFO Online — a Rust shell experiment
 
-A no-Electron desktop shell for **DFO Online**, the open-source
+> **Proof of concept — use at your own risk.** This is an experiment, not a
+> supported client. It writes to the real `Daggerfall JavaScript/Prefs` and
+> `Saves` folders. Back them up first. Not for online play.
+
+An experimental, no-Electron desktop shell for **DFO Online**, the open-source
 (Daggerfall-Unity-derived, MIT) web game. The game itself is unchanged: this
 replaces only the `app/` shell, starting with offline play.
 
-Status: **spike, working.** It boots the current build (0.1.14461), runs it on
+DFO Online is unofficial and not affiliated with Bethesda Softworks or ZeniMax
+Media. See [NOTICE](NOTICE) for attribution, the upstream licences and the full
+disclaimer. The shell's own code is MIT (see [LICENSE](LICENSE)).
+
+Status: **spike, working.** It boots the current build (0.1.14473), runs it on
 WebKitGTK, serves the player's own ARENA2 from disk, **backs the game's
 localStorage-style store with the same `Saves/` + `Prefs/` files the Electron
 shell uses**, and reports engine facts through a control channel. It does not
