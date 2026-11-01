@@ -111,12 +111,13 @@ WebKit `PreferPageRenderingUpdatesNear60FPS` feature and `GDK_GL=disable`
 same page in Chromium (Vivaldi app-mode) is 144 fps. `notes/experiment-3.md`
 has the matrix.
 
-The remaining native route is **GTK4 + WebKitGTK 6.0** (GTK4's frame clock
-requests Wayland callbacks). wry/tao are GTK3-only; the `webkitgtk` Rust crate
-is an unpublished placeholder. `webkitgtk-6.0` 2.54.2 is in Arch `extra`, but
-this machine needs a full `pacman -Syu` first — never a partial upgrade. Test
-it with a small GTK4/WebKitGTK 6.0 page (Python GI or a C shim) before porting
-the shell.
+**GTK4 + WebKitGTK 6.0 was tested too** (2.54.2, after the full system update,
+`tools/gtk4-raf.py`): the GTK4 frame clock is 6944 µs (144 Hz), the near-60
+feature is off at web-process construction, the window is focused and visible,
+and rAF is still ~62 fps / 16 ms. The cap is in WebKitGTK's animation
+scheduling, not GTK's frame clock, so the native 144 fps route is closed.
+Remaining: Chromium app-mode (144 today, tiny, but a browser dependency), CEF
+(bundled Chromium), or accept 60 fps.
 
 ## Comparing against Electron and Chromium
 

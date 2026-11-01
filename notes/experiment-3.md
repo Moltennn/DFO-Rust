@@ -93,14 +93,25 @@ custom location): `?exterior&region=Cyrodiil&loc=Imperial City` fails with
 killed the level-1 test character. Sentinel is a real MAPS.BSA region and the
 heaviest ordinary city reachable this way.
 
+## GTK4 / WebKitGTK 6.0 (2.54.2)
+
+Installed after the full system update (321 packages). The probe is
+`tools/gtk4-raf.py`; it builds the WebKit settings first, disables
+`PreferPageRenderingUpdatesNear60FPS`, then loads the page.
+
+Bare `raf.html`, 1280×772, focused, visible:
+
+- GTK4 frame clock: `refresh_info` 6944 µs (144 Hz)
+- near-60 feature: off at web-process construction
+- rAF: 62.3 fps / 16.06 ms (t+4, t+12, t+22)
+- Sentinel scene: 62.9 fps / 15.9 ms
+
+GTK4's clock follows the output, but WebKitGTK's rAF does not. The cap is in
+WebKitGTK's animation scheduling, not GTK's frame clock: the GTK4 port does not
+lift it either. The native 144 fps route is closed.
+
 ## What is left
 
-- **GTK4 + WebKitGTK 6.0**: the proper fix (GTK4's frame clock requests
-  Wayland callbacks). Not installed; `webkitgtk-6.0` 2.54.2 is in `extra`.
-  This system has **321 pending updates**, so a full `pacman -Syu` is needed
-  before installing it (never a partial upgrade). wry/tao are GTK3-only, so
-  this means a GTK4 shell (gtk4-rs + a WebKitGTK 6.0 FFI shim, since the
-  `webkitgtk` crate is an unpublished placeholder), or a C/GTK4 shim.
 - **Chromium app-mode** (Vivaldi/Chrome) with the local origin and an injected
   `daggerShell` script: 144 fps today, tiny, no bundled engine; the cost is
   depending on an installed browser and losing the native window/menu.

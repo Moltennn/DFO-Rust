@@ -144,8 +144,10 @@ content on the leftmost output (1920×1080 @ 144 Hz):
 
 The Sentinel scene is 64 blocks / 568 draws — the heaviest ordinary city the
 scene router offers. The 60 fps cap is WebKitGTK's, not the page's frame cap:
-the same page follows 144 Hz under Chromium on the same output. There is no
-memory win either; the game's heap dominates both. Details in
+the same page follows 144 Hz under Chromium on the same output. GTK4 +
+WebKitGTK 6.0 does not help either: its frame clock is 144 Hz and the near-60
+feature is off, yet rAF still measures ~62 fps (`tools/gtk4-raf.py`). There is
+no memory win either; the game's heap dominates both. Details in
 `notes/comparison.md` and `notes/experiment-3.md`.
 
 ## Known gaps / next steps
@@ -156,8 +158,10 @@ memory win either; the game's heap dominates both. Details in
    two words (`onView`, `act`), easy to port once the game window is settled.
 3. **ARENA2 detection and the folder picker** (Steam/GOG/DFU settings search) —
    the Electron shell's `arena2Detect.cjs` is the reference.
-4. **In-game performance in a real city/dungeon**, not just the Test Room, and
-   the like-for-like Electron run (same build, same Prefs, same window).
+4. **The 144 fps question is settled for the native stack.** Sentinel was
+   measured (64 blocks / 568 draws); GTK4 + WebKitGTK 6.0 was tested and also
+   holds rAF at ~62 fps. The remaining 144 fps route is Chromium (app-mode or
+   CEF), or accept 60 fps and keep the small native shell.
 5. **Mod loader integration.** The mods patch the served bytes; a shell that
    serves `game/dist` can apply the same view/overlay before responding.
    The control channel is a placeholder for the `dfo` CDP tooling on Linux,
