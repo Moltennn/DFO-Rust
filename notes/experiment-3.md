@@ -110,6 +110,33 @@ GTK4's clock follows the output, but WebKitGTK's rAF does not. The cap is in
 WebKitGTK's animation scheduling, not GTK's frame clock: the GTK4 port does not
 lift it either. The native 144 fps route is closed.
 
+## Output refresh, VSync and mixed monitors
+
+The 60 Hz figure could have been VSync, or the mixed 144/165/60 Hz monitor
+layout. Tested separately:
+
+| configuration | GTK clock | rAF |
+|---|---|---|
+| DP-1, 144 Hz | 6944 µs (144 Hz) | 62.3 fps |
+| DP-3, 165 Hz | 6067 µs (165 Hz) | 62.4 fps |
+| Mesa `vblank_mode=0` | 6067 µs | 62.4 fps |
+| XWayland (`GDK_BACKEND=x11`) | 16667 µs | 62.4 fps |
+| `WEBKIT_DISABLE_COMPOSITING_MODE=1` | 6944 µs | 62.3 fps |
+| gamescope nested `-r 144` | 16667 µs | 62.3 fps |
+
+Gamescope's nested output reported 16667 µs, so that run is inconclusive about
+a true 144 Hz nested compositor. The rest are clear: the GTK clock follows
+144 Hz and 165 Hz, the window is focused and visible, and WebKit's rAF still
+fires every ~16 ms.
+
+The control that settles it: Chromium app-mode with
+`--disable-gpu-vsync --disable-frame-rate-limit`, same Sentinel scene,
+**243 fps / 4 ms median / 4.7 ms p95**. The page and the machine have the
+headroom; the cap is WebKitGTK's animation scheduling, not VSync, not the
+output refresh, and not the mixed-monitor layout. A compositor with a single
+output is the one untested configuration; the frame-clock data makes it an
+unlikely cause.
+
 ## What is left
 
 - **Chromium app-mode** (Vivaldi/Chrome) with the local origin and an injected

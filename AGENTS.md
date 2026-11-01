@@ -116,8 +116,14 @@ has the matrix.
 feature is off at web-process construction, the window is focused and visible,
 and rAF is still ~62 fps / 16 ms. The cap is in WebKitGTK's animation
 scheduling, not GTK's frame clock, so the native 144 fps route is closed.
-Remaining: Chromium app-mode (144 today, tiny, but a browser dependency), CEF
-(bundled Chromium), or accept 60 fps.
+
+Output refresh and VSync are not the cause either: 144 Hz (DP-1) and 165 Hz
+(DP-3) outputs both give ~62 fps while the GTK clock is 6944/6067 µs;
+`vblank_mode=0`, XWayland and `WEBKIT_DISABLE_COMPOSITING_MODE=1` are all ~62.
+Chromium with `--disable-gpu-vsync --disable-frame-rate-limit` reaches
+**243 fps** in the same Sentinel scene. Remaining: Chromium app-mode (144
+today, tiny, but a browser dependency), CEF (bundled Chromium), or accept 60
+fps.
 
 ## Comparing against Electron and Chromium
 
