@@ -31,6 +31,28 @@ static gboolean dfo_permission_request(WebKitWebView* view, WebKitPermissionRequ
     return FALSE;
 }
 
+/*
+ * The probe's channel (window.webkit.messageHandlers.dfo): its snapshots,
+ * fps/error reports and F12 land here. There is no Rust IPC in this shell,
+ * so the shim prints them and opens the inspector.
+ */
+static void dfo_probe_message(WebKitUserContentManager* manager, JSCValue* value, gpointer user_data)
+{
+    (void)manager;
+    if (!jsc_value_is_string(value))
+        return;
+    char* text = jsc_value_to_string(value);
+    if (!text)
+        return;
+    if (g_strstr_len(text, -1, "\"kind\":\"devtools\"")) {
+        WebKitWebInspector* inspector = webkit_web_view_get_inspector(WEBKIT_WEB_VIEW(user_data));
+        webkit_web_inspector_show(inspector);
+    } else {
+        g_printerr("[probe] %s\n", text);
+    }
+    g_free(text);
+}
+
 GtkWidget* dfo_webview_new(const char* url, const char* probe_js)
 {
     WebKitSettings* settings = webkit_settings_new();
@@ -40,6 +62,7 @@ GtkWidget* dfo_webview_new(const char* url, const char* probe_js)
     if (feature)
         webkit_settings_set_feature_enabled(settings, feature, FALSE);
     webkit_feature_list_unref(features);
+    webkit_settings_set_enable_developer_extras(settings, TRUE);
 
     WebKitWebView* view = WEBKIT_WEB_VIEW(webkit_web_view_new());
     webkit_web_view_set_settings(view, settings);
@@ -52,6 +75,9 @@ GtkWidget* dfo_webview_new(const char* url, const char* probe_js)
         NULL, NULL);
     webkit_user_content_manager_add_script(manager, script);
     webkit_user_script_unref(script);
+
+    g_signal_connect(manager, "script-message-received::dfo", G_CALLBACK(dfo_probe_message), view);
+    webkit_user_content_manager_register_script_message_handler(manager, "dfo", NULL);
 
     g_signal_connect(view, "permission-request", G_CALLBACK(dfo_permission_request), NULL);
 

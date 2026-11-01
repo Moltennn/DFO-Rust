@@ -43,6 +43,7 @@ fn main() {
     }
     build.compile("dfo_webkit_shim");
 
+    println!("cargo:rerun-if-changed=src/webkit_shim.c");
     println!("cargo:rerun-if-env-changed=DFO_WEBKIT_PREFIX");
     println!("cargo:rerun-if-env-changed=DFO_ALLOW_SYSTEM_WEBKIT");
 }

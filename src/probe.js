@@ -1,6 +1,7 @@
 /*
- * The page-side probe. Injected before any game script; posts JSON over
- * window.ipc.postMessage, which the Rust side prints.
+ * The page-side probe. Injected before any game script; posts JSON over the
+ * shell's message channel (`window.webkit.messageHandlers.dfo`), which the
+ * WebKitGTK shim prints.
  *
  * It never touches the game's own canvas: a throwaway 1x1 canvas answers the
  * adapter question, so the game's WebGL2 context keeps its own attributes.
@@ -40,19 +41,6 @@
     );
   }
 
-  window.addEventListener(
-    'keydown',
-    (event) => {
-      if (!event.altKey || (event.key !== 'Enter' && event.code !== 'Enter')) return;
-      event.preventDefault();
-      // The shell owns the window: the GTK4 shell catches Alt+Enter itself;
-      // the wry shell toggles fullscreen on this IPC message. No DOM
-      // fullscreen, so pointer lock survives the switch.
-      post('fullscreen', {});
-    },
-    true,
-  );
-
   // Lock on the first click on the game's canvas from here, synchronously in
   // the gesture. The game asks with unadjustedMovement first and retries in a
   // promise handler; on WebKit that retry can be too late and the first click
@@ -90,8 +78,9 @@
   else window.addEventListener('DOMContentLoaded', lockCursorCss, { once: true });
 
   const post = (kind, data) => {
+    const message = JSON.stringify({ kind, ...data });
     try {
-      window.ipc.postMessage(JSON.stringify({ kind, ...data }));
+      window.webkit?.messageHandlers?.dfo?.postMessage(message);
     } catch {
       /* the channel is gone (page closing) */
     }
