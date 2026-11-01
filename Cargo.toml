@@ -7,8 +7,9 @@ license = "MIT"
 repository = "https://github.com/Moltennn/DFO-Rust"
 
 [dependencies]
-axum = "0.8.9"
+axum = { version = "0.8.9", features = ["ws"] }
 base64 = "0.23.1"
+evdev = "0.13.2"
 gtk4 = { version = "0.11", features = ["v4_10"] }
 reqwest = { version = "0.12", default-features = false, features = ["stream"] }
 serde = { version = "1.0.229", features = ["derive"] }

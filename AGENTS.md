@@ -20,6 +20,7 @@ src/main.rs        GTK4 window and app
 src/server.rs      local origin: dist/, ARENA2, /__dfo, /__store
 src/store.rs       file store (Prefs/ + Saves/, the Electron shell's layout)
 src/mods.rs        optional DFO-Mods loader: spawn it, proxy its files
+src/input.rs       raw mouse from evdev + the /__input websocket
 src/probe.js       injected probe + daggerShell storage bridge
 src/webkit_shim.c  the WebKitGTK 6.0 calls with no usable Rust binding
 build.rs           pkg-config + the shim; warns on the system WebKit
@@ -108,6 +109,7 @@ EOF, so killing the shell (even by signal) stops it.
 - `--serve-only` — the origin without a window, for pointing a browser at it
 - `--url URL` — load an existing page instead of starting the origin
 - `--mods DIR` / `--no-mods` — use the DFO-Mods loader (default: `../DFO-Mods` when it exists)
+- `--no-raw-input` — do not read evdev; use the compositor's relative stream
 - `--root DIR`, `--arena2 DIR`, `--port N`
 
 The port is pinned to 47565 because WebKitGTK keys `localStorage` and
@@ -132,12 +134,22 @@ The probe makes pointer lock reliable and the mouse feel like the desktop game:
   unlocked);
 - while locked, it forces `cursor: none !important` over the game's custom
   cursor images;
-- it scales locked `movementX`/`movementY` by `DFO_MOUSE_GAIN` (default 2.5),
-  a linear factor. A real-mouse sweep on the same save and window gave
-  Electron ~2.5x the raw counts WebKitGTK gets under Wayland (not pointer
-  acceleration: the KDE device is flat), so 2.5 matches the desktop feel.
-  The probe reads the gain per event, so it can be changed live with
+- it reads the mouse's **evdev** node (`src/input.rs`, one thread per mouse,
+  uaccess needed) and streams the device's `REL_X/REL_Y` counts over
+  `/__input`; while locked the probe drops WebKit's pixel-quantised deltas and
+  dispatches the raw counts once per frame (the `buttons` mask rides along;
+  menus still use WebKit events). Raw counts are ~2.5x the compositor stream
+  for the same hand motion and need no gain or acceleration.
+- without a readable mouse it falls back to WebKit's relative stream with the
+  linear `DFO_MOUSE_GAIN` (default 2.5; 1 keeps the compositor's deltas). The
+  probe reads the gain per event, so it can be changed live with
   `globalThis.__dfoMouseGain = 2` for testing.
+
+The evdev path needs a udev rule outside the repo (mice only, active session):
+
+    SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", TAG+="uaccess"
+
+`--no-raw-input` forces the fallback.
 
 **Alt+Enter** fullscreens the window. GTK4 handles it with a capture-phase key
 controller, so the page never sees it and pointer lock stays.

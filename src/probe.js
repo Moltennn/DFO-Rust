@@ -25,6 +25,7 @@
   window.addEventListener(
     'mousemove',
     (event) => {
+      if (event.__dfoRaw) return;
       const gain = mouseGain();
       if (gain === 1 || !document.pointerLockElement) return;
       try {
@@ -43,23 +44,24 @@
     true,
   );
 
-  // Lock on the first click on the game's canvas from here, synchronously in
-  // the gesture. The game asks with unadjustedMovement first and retries in a
-  // promise handler; on WebKit that retry can be too late and the first click
-  // silently leaves the game unlocked (visible cursor, no mouse look).
-  window.addEventListener(
-    'mousedown',
-    (event) => {
-      const canvas = event.target;
-      if (!(canvas instanceof HTMLCanvasElement) || document.pointerLockElement) return;
-      try {
-        canvas.requestPointerLock?.();
-      } catch {
-        /* the game's own request remains */
-      }
-    },
-    true,
-  );
+  // One pointer-lock request per gesture. The game asks with
+  // unadjustedMovement (which WebKit rejects) and retries after the rejection;
+  // a second request from the shell on the same click made WebKit answer two
+  // permission requests, and the resulting lock could be nominal only: the
+  // compositor never confined the pointer, so movement came from cursor
+  // deltas (grid-like, edge-limited).
+  const requestPointerLock = Element.prototype.requestPointerLock;
+  let lockPending = null;
+  Element.prototype.requestPointerLock = function requestPlain() {
+    if (document.pointerLockElement === this) return Promise.resolve();
+    if (lockPending) return lockPending;
+    lockPending = requestPointerLock
+      .call(this)
+      .finally(() => {
+        lockPending = null;
+      });
+    return lockPending;
+  };
 
   // Keep every CSS cursor (including the game's custom images) off while the
   // pointer is locked, so a hovered element cannot bring a cursor back.
@@ -79,6 +81,16 @@
   if (document.head) lockCursorCss();
   else window.addEventListener('DOMContentLoaded', lockCursorCss, { once: true });
 
+  document.addEventListener('pointerlockchange', () =>
+    post('lock', {
+      locked: !!document.pointerLockElement,
+      at: Math.round(performance.now()),
+    }),
+  );
+  document.addEventListener('pointerlockerror', () =>
+    post('lockerror', { at: Math.round(performance.now()) }),
+  );
+
   const post = (kind, data) => {
     const message = JSON.stringify({ kind, ...data });
     try {
@@ -87,6 +99,94 @@
       /* the channel is gone (page closing) */
     }
   };
+
+  /* ---- raw evdev mouse ------------------------------------------------
+   *
+   * Wayland's relative-pointer stream is quantised to surface pixels; the
+   * shell's evdev reader has the mouse's own counts (about 2.5x more for the
+   * same hand motion). While locked, drop WebKit's deltas and dispatch the raw
+   * ones once per frame. Menus keep WebKit events; raw is only for the look.
+   */
+  let rawActive = false;
+  let rawSocket = null;
+  let rawDx = 0;
+  let rawDy = 0;
+  let rawButtons = 0;
+  let rawFrame = 0;
+  const flushRaw = () => {
+    rawFrame = 0;
+    if (!rawActive || !document.pointerLockElement || !document.hasFocus()) {
+      rawDx = 0;
+      rawDy = 0;
+      return;
+    }
+    const dx = rawDx;
+    const dy = rawDy;
+    const buttons = rawButtons;
+    rawDx = 0;
+    rawDy = 0;
+    if (dx === 0 && dy === 0) return;
+    const event = new MouseEvent('mousemove', {
+      bubbles: true,
+      cancelable: true,
+      buttons,
+      clientX: Math.round(innerWidth / 2),
+      clientY: Math.round(innerHeight / 2),
+    });
+    Object.defineProperty(event, 'movementX', { value: dx });
+    Object.defineProperty(event, 'movementY', { value: dy });
+    event.__dfoRaw = true;
+    document.pointerLockElement.dispatchEvent(event);
+    if (rawDx || rawDy) rawFrame = requestAnimationFrame(flushRaw);
+  };
+  const connectRaw = () => {
+    const socket = new WebSocket(`ws://${location.host}/__input`);
+    rawSocket = socket;
+    socket.onmessage = (message) => {
+      if (!rawActive) return;
+      let delta;
+      try {
+        delta = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      rawDx += Number(delta.dx) || 0;
+      rawDy += Number(delta.dy) || 0;
+      rawButtons = Number(delta.buttons) || 0;
+      if (!rawFrame && document.pointerLockElement && document.hasFocus()) {
+        rawFrame = requestAnimationFrame(flushRaw);
+      }
+    };
+    socket.onerror = () => {
+      rawActive = false;
+      rawSocket = null;
+    };
+    socket.onclose = () => {
+      rawActive = false;
+      rawSocket = null;
+    };
+  };
+  fetch('/__input/status', { cache: 'no-store' })
+    .then((response) => response.json())
+    .then((status) => {
+      post('raw', status);
+      if (status.enabled && status.available) {
+        rawActive = true;
+        connectRaw();
+      }
+    })
+    .catch(() => {
+      /* no raw input: the compositor stream and the gain stay in charge */
+    });
+  window.addEventListener(
+    'mousemove',
+    (event) => {
+      if (!rawActive || !document.pointerLockElement || event.__dfoRaw) return;
+      event.stopImmediatePropagation();
+    },
+    true,
+  );
+
 
   /* ---- the daggerShell storage bridge --------------------------------
    *

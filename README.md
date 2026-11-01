@@ -28,6 +28,8 @@ files. This shell does the same with much less machinery:
   timing patch (the system library caps the page at 60 fps).
 - **A small local web server** on a fixed port (47565), serving the game files
   and ARENA2.
+- **Raw mouse input** from the device's evdev node, streamed to the page for
+  the pointer-lock look (Wayland's own relative stream is pixel-quantised).
 - **A probe** injected into the page, used for measurements and for driving the
   UI without touching the mouse.
 - **Files on disk** for saves and settings, in the official shell's own folders.
@@ -86,9 +88,11 @@ backup. `AGENTS.md` has the details.
 
 Requirements: Rust, GTK4, and the private patched WebKitGTK 6.0 (built once,
 see `notes/native-webkit-patch.md`; it installs to
-`~/.local/webkitgtk-patched`). Node 18+ is needed only for the mods. ARENA2
-comes from `~/.config/Daggerfall JavaScript/config.json` (`arena2Path`), or
-`--arena2`.
+`~/.local/webkitgtk-patched`). Node 18+ is needed only for the mods. Raw mouse
+input needs read access to the mouse's `/dev/input/event*` node (udev
+`uaccess`); without it the shell falls back to the compositor's relative
+stream. ARENA2 comes from
+`~/.config/Daggerfall JavaScript/config.json` (`arena2Path`), or `--arena2`.
 
 ```bash
 # one-time: pull the current build out of the installed AppImage's app.asar
@@ -127,12 +131,19 @@ or point `DFO_APP` at an `app.asar`.
 `/__dfo` evaluates JavaScript in the page. It binds to 127.0.0.1 only; it is a
 development door, not a security boundary.
 
-Mouse look is scaled to match the desktop game with a **linear** factor: on
-the same save, window and hand sweep, Electron reported about 2.5× the raw
-counts WebKitGTK receives under Wayland, so the game turned 2.5× slower here.
-The default gain is 2.5; `DFO_MOUSE_GAIN` overrides it (`1` keeps the raw
-deltas). This is a constant multiplier, not pointer acceleration.
-**Alt+Enter** toggles fullscreen.
+Mouse look uses the mouse's **raw device counts** from `/dev/input/event*`,
+streamed to the page while the pointer is locked: 1:1, no acceleration, and
+about 2.5× the counts WebKitGTK gets from Wayland's surface-pixel relative
+stream (which made the look slow and grid-like). The shell needs udev
+`uaccess` on the mouse:
+
+```udev
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", TAG+="uaccess"
+```
+
+Without a readable mouse device the shell falls back to the compositor stream
+with a linear `DFO_MOUSE_GAIN` (default 2.5; `1` keeps the compositor's raw
+deltas). `--no-raw-input` forces the fallback. **Alt+Enter** toggles fullscreen.
 
 ## Measured
 

@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
 use axum::body::{Body, Bytes};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, Request, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -29,8 +30,10 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::broadcast;
 use tower_http::services::ServeDir;
 
+use crate::input::{self, Delta, RawInput};
 use crate::store::Store;
 
 #[derive(Clone, Debug)]
@@ -43,6 +46,7 @@ pub struct Config {
     pub height: f64,
     pub mods: Option<PathBuf>,
     pub proxy: Option<String>,
+    pub raw_input: bool,
     pub no_launcher: bool,
     pub serve_only: bool,
 }
@@ -61,6 +65,7 @@ impl Config {
             height: 800.0,
             mods: std::env::var_os("DFO_MODS_DIR").map(PathBuf::from),
             proxy: None,
+            raw_input: true,
             no_launcher: false,
             serve_only: false,
         };
@@ -79,6 +84,7 @@ impl Config {
                 "--height" => cfg.height = number(&mut args, "--height"),
                 "--mods" => cfg.mods = Some(PathBuf::from(value(&mut args, "--mods"))),
                 "--no-mods" => cfg.mods = None,
+                "--no-raw-input" => cfg.raw_input = false,
                 "--serve-only" => cfg.serve_only = true,
                 "--no-launcher" => cfg.no_launcher = true,
                 other => {
@@ -197,6 +203,7 @@ struct Control {
 #[derive(Clone)]
 struct AppState {
     arena2: Arena2,
+    raw: Arc<RawInput>,
     proxy: Option<String>,
     client: reqwest::Client,
     control: Control,
@@ -210,11 +217,17 @@ pub fn spawn(cfg: Config) -> std::io::Result<(SocketAddr, Arena2)> {
     let port = cfg.port;
     let arena2: Arena2 = Arc::new(RwLock::new(cfg.arena2.clone()));
     let shared = Arc::clone(&arena2);
+    let raw = Arc::new(input::start(cfg.raw_input));
+    if !raw.available {
+        eprintln!("[dfo-shell] raw input unavailable (no readable mouse device)");
+    } else {
+        eprintln!("[dfo-shell] raw input: {}", raw.devices.join(", "));
+    }
     let (tx, rx) = std::sync::mpsc::channel::<Result<SocketAddr, String>>();
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
         rt.block_on(async move {
-            let app = router(cfg, shared);
+            let app = router(cfg, shared, raw);
             let listener = match tokio::net::TcpListener::bind(("127.0.0.1", port)).await {
                 Ok(listener) => listener,
                 Err(e) => {
@@ -234,11 +247,12 @@ pub fn spawn(cfg: Config) -> std::io::Result<(SocketAddr, Arena2)> {
     }
 }
 
-fn router(cfg: Config, arena2: Arena2) -> Router {
+fn router(cfg: Config, arena2: Arena2, raw: Arc<RawInput>) -> Router {
     let files = ServeDir::new(&cfg.root).append_index_html_on_directories(true);
     let proxy = cfg.proxy.clone();
     let state = AppState {
         arena2,
+        raw,
         proxy: proxy.clone(),
         client: reqwest::Client::builder()
             .no_proxy()
@@ -258,7 +272,9 @@ fn router(cfg: Config, arena2: Arena2) -> Router {
         .route("/__store/keys", get(store_keys))
         .route("/__store/get", get(store_get))
         .route("/__store/set", axum::routing::post(store_set))
-        .route("/__store/remove", axum::routing::post(store_remove));
+        .route("/__store/remove", axum::routing::post(store_remove))
+        .route("/__input/status", get(input_status))
+        .route("/__input", get(input_ws));
     let router = if proxy.is_some() {
         // Mods mode: the loader answers the game's files, the shell keeps the
         // store and the control channel.
@@ -445,6 +461,50 @@ async fn store_remove(State(state): State<AppState>, Json(body): Json<RemoveBody
     match state.store.remove(&body.key) {
         Ok(()) => (StatusCode::OK, "ok").into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/* ------------------------------------------------------------- raw input */
+
+/// GET /__input/status -> whether an evdev mouse is readable.
+async fn input_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(json!({
+        "enabled": state.raw.enabled,
+        "available": state.raw.available,
+        "devices": state.raw.devices,
+    }))
+}
+
+/// GET /__input -> WebSocket of raw deltas (device counts, unaccelerated).
+async fn input_ws(State(state): State<AppState>, upgrade: WebSocketUpgrade) -> Response {
+    let receiver = state.raw.tx.subscribe();
+    upgrade.on_upgrade(move |socket| input_socket(socket, receiver))
+}
+
+async fn input_socket(mut socket: WebSocket, mut receiver: broadcast::Receiver<Delta>) {
+    loop {
+        tokio::select! {
+            delta = receiver.recv() => match delta {
+                Ok(delta) => {
+                    let message = json!({
+                        "dx": delta.dx,
+                        "dy": delta.dy,
+                        "buttons": delta.buttons,
+                    })
+                    .to_string();
+                    if socket.send(Message::Text(message.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Err(_)) => break,
+                _ => {}
+            },
+        }
     }
 }
 
