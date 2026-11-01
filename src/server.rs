@@ -27,6 +27,8 @@ pub struct Config {
     pub arena2: Option<PathBuf>,
     pub external_url: Option<String>,
     pub port: u16,
+    pub width: f64,
+    pub height: f64,
 }
 
 impl Config {
@@ -39,6 +41,8 @@ impl Config {
             // origin, and an origin carries the port. A random port would give
             // the game a fresh profile every launch.
             port: 47565,
+            width: 1280.0,
+            height: 800.0,
         };
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -52,6 +56,20 @@ impl Config {
                         .expect("--port needs a number")
                         .parse()
                         .expect("bad --port")
+                }
+                "--width" => {
+                    cfg.width = args
+                        .next()
+                        .expect("--width needs a number")
+                        .parse()
+                        .expect("bad --width")
+                }
+                "--height" => {
+                    cfg.height = args
+                        .next()
+                        .expect("--height needs a number")
+                        .parse()
+                        .expect("bad --height")
                 }
                 other => panic!("unknown argument: {other}"),
             }
