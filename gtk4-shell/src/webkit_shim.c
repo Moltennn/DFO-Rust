@@ -13,6 +13,24 @@
 #include <gtk/gtk.h>
 #include <webkit/webkit.h>
 
+/*
+ * The game asks for pointer lock on a click (WebCore's pointer lock path).
+ * WebKitGTK routes that through WebKitWebView::permission-request, and the
+ * request stays pending until the app decides, so without this handler the
+ * pointer is never locked: the cursor stays visible and the game falls back to
+ * its slow, unlocked look.
+ */
+static gboolean dfo_permission_request(WebKitWebView* view, WebKitPermissionRequest* request, gpointer user_data)
+{
+    (void)view;
+    (void)user_data;
+    if (WEBKIT_IS_POINTER_LOCK_PERMISSION_REQUEST(request)) {
+        webkit_permission_request_allow(request);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 GtkWidget* dfo_webview_new(const char* url, const char* probe_js)
 {
     WebKitSettings* settings = webkit_settings_new();
@@ -34,6 +52,8 @@ GtkWidget* dfo_webview_new(const char* url, const char* probe_js)
         NULL, NULL);
     webkit_user_content_manager_add_script(manager, script);
     webkit_user_script_unref(script);
+
+    g_signal_connect(view, "permission-request", G_CALLBACK(dfo_permission_request), NULL);
 
     gtk_widget_set_hexpand(GTK_WIDGET(view), TRUE);
     gtk_widget_set_vexpand(GTK_WIDGET(view), TRUE);

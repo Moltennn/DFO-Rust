@@ -114,6 +114,12 @@ while the other is running: one store, one origin. The window opens on the
 active KWin output; WebKit's display link follows the main display (DP-3 here),
 so that is the output where the 165 fps numbers come from.
 
+Both shells allow WebKit's **pointer-lock** permission request (wry:
+`with_permission_handler`; GTK4: the shim's `permission-request` handler).
+WebKitGTK keeps the request pending if the app does not decide: the cursor
+stays visible and the game, which only looks around under pointer lock, falls
+back to its slow unlocked path.
+
 ## Driving the page
 
 `tools/ctl.mjs` queues one JS expression; the injected probe evals it and posts

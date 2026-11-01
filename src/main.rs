@@ -118,6 +118,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_url(start_url)
         .with_background_color((17, 17, 17, 255))
         .with_initialization_script(PROBE)
+        // The game looks around through pointer lock; WebKitGTK asks the app
+        // and, unhandled, keeps the request pending: the cursor stays and the
+        // game falls back to its slow unlocked look.
+        .with_permission_handler(|kind| match kind {
+            wry::PermissionKind::PointerLock => wry::PermissionResponse::Allow,
+            _ => wry::PermissionResponse::Default,
+        })
         .with_ipc_handler(move |req| {
             let body = String::from_utf8_lossy(req.body().as_bytes());
             if let Ok(ev) = serde_json::from_str::<serde_json::Value>(&body) {
