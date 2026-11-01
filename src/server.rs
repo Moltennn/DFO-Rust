@@ -67,39 +67,72 @@ impl Config {
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
             match arg.as_str() {
-                "--root" => cfg.root = PathBuf::from(args.next().expect("--root needs a path")),
-                "--arena2" => cfg.arena2 = args.next().map(PathBuf::from),
-                "--url" => cfg.external_url = args.next(),
-                "--port" => {
-                    cfg.port = args
-                        .next()
-                        .expect("--port needs a number")
-                        .parse()
-                        .expect("bad --port")
+                "-h" | "--help" => {
+                    print_usage();
+                    std::process::exit(0);
                 }
-                "--width" => {
-                    cfg.width = args
-                        .next()
-                        .expect("--width needs a number")
-                        .parse()
-                        .expect("bad --width")
-                }
-                "--height" => {
-                    cfg.height = args
-                        .next()
-                        .expect("--height needs a number")
-                        .parse()
-                        .expect("bad --height")
-                }
-                "--mods" => cfg.mods = Some(PathBuf::from(args.next().expect("--mods needs a path"))),
+                "--root" => cfg.root = PathBuf::from(value(&mut args, "--root")),
+                "--arena2" => cfg.arena2 = Some(PathBuf::from(value(&mut args, "--arena2"))),
+                "--url" => cfg.external_url = Some(value(&mut args, "--url")),
+                "--port" => cfg.port = number(&mut args, "--port"),
+                "--width" => cfg.width = number(&mut args, "--width"),
+                "--height" => cfg.height = number(&mut args, "--height"),
+                "--mods" => cfg.mods = Some(PathBuf::from(value(&mut args, "--mods"))),
                 "--no-mods" => cfg.mods = None,
                 "--serve-only" => cfg.serve_only = true,
                 "--no-launcher" => cfg.no_launcher = true,
-                other => panic!("unknown argument: {other}"),
+                other => {
+                    eprintln!("unknown argument: {other}\n");
+                    print_usage();
+                    std::process::exit(2);
+                }
             }
         }
         cfg
     }
+}
+
+fn value(args: &mut impl Iterator<Item = String>, flag: &str) -> String {
+    args.next().unwrap_or_else(|| {
+        eprintln!("{flag} needs a value\n");
+        print_usage();
+        std::process::exit(2);
+    })
+}
+
+fn number<T>(args: &mut impl Iterator<Item = String>, flag: &str) -> T
+where
+    T: std::str::FromStr,
+{
+    let raw = value(args, flag);
+    raw.parse().unwrap_or_else(|_| {
+        eprintln!("bad {flag}: {raw}\n");
+        print_usage();
+        std::process::exit(2);
+    })
+}
+
+fn print_usage() {
+    println!(
+        "dfo-shell - an experimental GTK4 shell for DFO Online
+
+USAGE:
+  dfo-shell [OPTIONS]
+
+OPTIONS:
+  --width N --height N   window content size (default 1280x800)
+  --root DIR             the extracted build served as the game (default game/dist)
+  --arena2 DIR           the Daggerfall ARENA2 folder (default: config.json's arena2Path)
+  --port N               local origin port (default 47565)
+  --url URL              load an existing page instead of the local origin
+  --mods DIR             serve the game through the DFO-Mods loader (DFO_MODS_DIR)
+  --no-mods              ignore DFO_MODS_DIR and the loader
+  --no-launcher          boot straight into the game
+  --serve-only           the origin without a window
+  -h, --help             print this
+
+State lives in $DFO_STATE_DIR (default ~/.local/share/dfo-rust)."
+    );
 }
 
 /// `<userData>/config.json`, the file the Electron shell keeps next to `Prefs/`
@@ -122,17 +155,14 @@ pub fn find_arena2(dir: &Path) -> Option<PathBuf> {
     let looks = |candidate: &Path| {
         candidate.join("MAPS.BSA").is_file() && candidate.join("BLOCKS.BSA").is_file()
     };
-    for candidate in [
+    [
         dir.to_path_buf(),
         dir.join("ARENA2"),
         dir.join("DAGGER/ARENA2"),
         dir.join("DF/DAGGER/ARENA2"),
-    ] {
-        if looks(&candidate) {
-            return Some(candidate);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|candidate| looks(candidate))
 }
 
 /// Write `arena2Path` back to the shared config, keeping the other keys.
@@ -236,7 +266,20 @@ fn router(cfg: Config, arena2: Arena2) -> Router {
     } else {
         router.fallback_service(files)
     };
-    router.with_state(state)
+    router
+        .layer(axum::middleware::from_fn(no_store))
+        .with_state(state)
+}
+
+/// Nothing here is cacheable: the served build (and whether mods are on) can
+/// change between launches, and a cached HTML page keeps the old loader tag
+/// out. The mod loader sends no-store too.
+async fn no_store(request: Request<Body>, next: axum::middleware::Next) -> Response {
+    let mut response = next.run(request).await;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 
 /// GET/HEAD everything the loader owns (the game's files, its boot script and

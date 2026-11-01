@@ -239,17 +239,17 @@ impl Store {
         slots.sort_unstable();
         for n in slots {
             let dir = self.saves().join(format!("SAVE{n}"));
-            if dir.join(DATA_FILE).is_file() {
-                if let Ok(v) = fs::read_to_string(dir.join(DATA_FILE)) {
-                    keys.push(format!("{SAVE_DATA_PREFIX}{n}"));
-                    values.insert(format!("{SAVE_DATA_PREFIX}{n}"), v);
-                }
+            if dir.join(DATA_FILE).is_file()
+                && let Ok(v) = fs::read_to_string(dir.join(DATA_FILE))
+            {
+                keys.push(format!("{SAVE_DATA_PREFIX}{n}"));
+                values.insert(format!("{SAVE_DATA_PREFIX}{n}"), v);
             }
-            if dir.join(INFO_FILE).is_file() {
-                if let Ok(v) = fs::read_to_string(dir.join(INFO_FILE)) {
-                    keys.push(format!("{SAVE_INFO_PREFIX}{n}"));
-                    values.insert(format!("{SAVE_INFO_PREFIX}{n}"), v);
-                }
+            if dir.join(INFO_FILE).is_file()
+                && let Ok(v) = fs::read_to_string(dir.join(INFO_FILE))
+            {
+                keys.push(format!("{SAVE_INFO_PREFIX}{n}"));
+                values.insert(format!("{SAVE_INFO_PREFIX}{n}"), v);
             }
             if let Some(v) = self.shot_value(&dir) {
                 keys.push(format!("{SAVE_SHOT_PREFIX}{n}"));
@@ -346,13 +346,13 @@ impl Store {
         let mut found: Vec<(&str, Option<&str>, std::time::SystemTime)> = Vec::new();
         for (name, mime) in SHOT_FILES {
             let path = dir.join(name);
-            if let Ok(meta) = fs::metadata(&path) {
-                if let Ok(mtime) = meta.modified() {
-                    found.push((name, mime, mtime));
-                }
+            if let Ok(meta) = fs::metadata(&path)
+                && let Ok(mtime) = meta.modified()
+            {
+                found.push((name, mime, mtime));
             }
         }
-        found.sort_by(|a, b| b.2.cmp(&a.2)); // newest first, a crash's tiebreak
+        found.sort_by_key(|entry| std::cmp::Reverse(entry.2)); // newest first, a crash's tiebreak
         let (name, mime, _) = found.into_iter().next()?;
         let bytes = fs::read(dir.join(name)).ok()?;
         match mime {

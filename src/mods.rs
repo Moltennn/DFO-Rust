@@ -141,10 +141,8 @@ fn forward<R: std::io::Read>(
         if let Ok(mut file) = log.lock() {
             let _ = writeln!(file, "{line}");
         }
-        if let Some(url) = url.as_ref() {
-            if let Some(found) = line.strip_prefix("DFO_MODS_URL=") {
-                let _ = url.send(found.trim().to_string());
-            }
+        if let (Some(sender), Some(found)) = (url.as_ref(), line.strip_prefix("DFO_MODS_URL=")) {
+            let _ = sender.send(found.trim().to_string());
         }
     }
 }

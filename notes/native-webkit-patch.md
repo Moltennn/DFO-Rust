@@ -103,12 +103,14 @@ output. The options were:
 - accept it and play on that display.
 
 The third option is the one taken: the game is played on DP-3 (the main
-display), and the shell follows it at 165 fps. The timer is also not
+display), and the shell follows it at the monitor's rate. The timer is also not
 vsync-locked, so a link rate that does not match the window would drop/tear.
 
 ## The shell
 
-`gtk4-shell` (see `notes/native-gtk4-shell.md`) is built on this prefix. On
-DP-3 / 165 Hz, Sentinel (64 blocks / 568 draws) holds **165 fps, mean 6.07 ms**.
+The shell (`src/main.rs` and `src/webkit_shim.c`, see
+`notes/native-gtk4-shell.md`) is built on this prefix. On
+DP-3 / 165 Hz, Sentinel (64 blocks / 568 draws, 1280×772) holds **164 fps,
+mean 6.1 ms**.
 The debug logging used to find the display selection has been removed from the
 installed build; the patch in `notes/native/` is the clean version.

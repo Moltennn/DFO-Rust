@@ -15,6 +15,21 @@ unsafe extern "C" {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = server::Config::from_args();
 
+    if cfg.external_url.is_none() && !cfg.root.join("play/index.html").is_file() {
+        eprintln!("[dfo-shell] no game build at {}", cfg.root.display());
+        eprintln!("[dfo-shell] extract it once:");
+        eprintln!(
+            "  mkdir -p vendor && (cd vendor && /path/DFO-Online-linux-x86_64.AppImage --appimage-extract 'resources/app.asar')"
+        );
+        eprintln!("  node tools/extract-build.mjs");
+        std::process::exit(2);
+    }
+    if cfg.external_url.is_none() && cfg.arena2.is_none() {
+        eprintln!(
+            "[dfo-shell] no ARENA2 folder configured; use the launcher's Game files... or pass --arena2"
+        );
+    }
+
     // The loader patches the store's build; the shell keeps the origin so the
     // store and the control channel stay on the same address.
     let _mods = match (cfg.external_url.is_none(), cfg.mods.clone()) {
@@ -45,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let _ = std::fs::create_dir_all(&state);
             let _ = std::fs::write(state.join("url"), &base);
             eprintln!("[dfo-shell] server {base}");
-            (format!("{base}/play/index.html"), Some(arena2))
+            (format!("{base}/play/index.html?dfo=1"), Some(arena2))
         }
     };
 

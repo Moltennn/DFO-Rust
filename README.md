@@ -65,6 +65,7 @@ src/lib.rs         shared: server, store, probe, state dir
 src/main.rs        the GTK4 window and app
 src/server.rs      the local server: game files, ARENA2, storage, control channel
 src/store.rs       the file store (Prefs/ + Saves/)
+src/mods.rs        optional DFO-Mods loader (spawn it, proxy its files)
 src/webkit_shim.c  the WebKitGTK 6.0 calls the Rust side cannot bind
 src/probe.js       injected page probe + the storage bridge
 tools/extract-build.mjs   app.asar -> plain game/dist + launcher/
@@ -85,8 +86,9 @@ backup. `AGENTS.md` has the details.
 
 Requirements: Rust, GTK4, and the private patched WebKitGTK 6.0 (built once,
 see `notes/native-webkit-patch.md`; it installs to
-`~/.local/webkitgtk-patched`). ARENA2 comes from
-`~/.config/Daggerfall JavaScript/config.json` (`arena2Path`), or `--arena2`.
+`~/.local/webkitgtk-patched`). Node 18+ is needed only for the mods. ARENA2
+comes from `~/.config/Daggerfall JavaScript/config.json` (`arena2Path`), or
+`--arena2`.
 
 ```bash
 # one-time: pull the current build out of the installed AppImage's app.asar
@@ -121,6 +123,9 @@ another workspace). The origin, the saves store and the control channel stay
 local. The loader needs the build bundled in the AppImage: extract it in the
 mods workspace once (`./DFO-Online-linux-x86_64.AppImage --appimage-extract`)
 or point `DFO_APP` at an `app.asar`.
+
+`/__dfo` evaluates JavaScript in the page. It binds to 127.0.0.1 only; it is a
+development door, not a security boundary.
 
 Mouse look is scaled to match the desktop game: Wayland hands WebKit raw
 relative motion while Electron on X11 sees the desktop's pointer acceleration.
