@@ -110,6 +110,21 @@ GTK4's clock follows the output, but WebKitGTK's rAF does not. The cap is in
 WebKitGTK's animation scheduling, not GTK's frame clock: the GTK4 port does not
 lift it either. The native 144 fps route is closed.
 
+## The actual source: the GLib display link
+
+`WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS=72` is rejected with "not a factor of
+refresh rate 60fps" while the GTK clock is 6944 µs. The rate comes from
+`DisplayLinkGLib`, which takes `DisplayVBlankMonitor::refreshRate()`. The DRM
+vblank monitor is unavailable in this session, so it falls back to
+`DisplayVBlankMonitorTimer`, whose constructor is hard-coded to
+`FullSpeedFramesPerSecond` (60). That is the cap: not the rAF scheduler, not
+GTK's clock, and not the output refresh.
+
+The fallback is a small patch away (use `gdk_monitor_get_refresh_rate` for the
+window's monitor, as the DRM path already does; WebKit bug 199376 comment 9
+suggests exactly this). It still needs a WebKitGTK rebuild, and the GTK3 port
+would also need a GTK4 shell because GTK3's own frame clock is 60.
+
 ## Output refresh, VSync and mixed monitors
 
 The 60 Hz figure could have been VSync, or the mixed 144/165/60 Hz monitor

@@ -146,12 +146,15 @@ The Sentinel scene is 64 blocks / 568 draws — the heaviest ordinary city the
 scene router offers. The 60 fps cap is WebKitGTK's, not the page's frame cap:
 the same page follows 144 Hz under Chromium on the same output. GTK4 +
 WebKitGTK 6.0 does not help either: its frame clock is 144 Hz and the near-60
-feature is off, yet rAF still measures ~62 fps (`tools/gtk4-raf.py`). It is not
-VSync or the mixed 144/165/60 Hz monitor layout either: 144 Hz and 165 Hz
-outputs, Mesa `vblank_mode=0`, XWayland and compositing off all stay at 60,
-while Chromium with `--disable-gpu-vsync --disable-frame-rate-limit` reaches
-**243 fps / 4 ms** in the same Sentinel scene. There is no memory win either;
-the game's heap dominates both. Details in `notes/comparison.md` and
+feature is off, yet rAF still measures ~62 fps (`tools/gtk4-raf.py`). The
+cause is WebKitGTK's GLib display link: its DRM vblank monitor is unavailable
+here, so it uses a 60 Hz timer fallback (`DisplayVBlankMonitorTimer`), while
+the GTK clock reports 144 Hz. It is not VSync or the mixed 144/165/60 Hz
+monitor layout either: 144 Hz and 165 Hz outputs, Mesa `vblank_mode=0`,
+XWayland and compositing off all stay at 60, while Chromium with
+`--disable-gpu-vsync --disable-frame-rate-limit` reaches **243 fps / 4 ms** in
+the same Sentinel scene. There is no memory win either; the game's heap
+dominates both. Details in `notes/comparison.md` and
 `notes/experiment-3.md`.
 
 ## Known gaps / next steps

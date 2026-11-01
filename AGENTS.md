@@ -125,6 +125,13 @@ Chromium with `--disable-gpu-vsync --disable-frame-rate-limit` reaches
 today, tiny, but a browser dependency), CEF (bundled Chromium), or accept 60
 fps.
 
+The root of it: WebKitGTK's GLib `DisplayLink` takes its rate from a DRM
+vblank monitor; that monitor is unavailable here, so it falls back to
+`DisplayVBlankMonitorTimer`, hard-coded to 60 (`WEBKIT_DISPLAY_REFRESH_THROTTLE_FPS=72`
+is rejected with "refresh rate 60fps" while the GTK clock is 144). A patch to
+the fallback (use the monitor's refresh) plus a GTK4 shell is the native fix;
+it needs a WebKitGTK rebuild.
+
 ## Comparing against Electron and Chromium
 
 Both need a free store (do not run two shells against it at once) and the same
