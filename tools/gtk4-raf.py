@@ -121,7 +121,9 @@ class App(Gtk.Application):
 
         clock = self.window.get_frame_clock()
         if clock is not None:
+            # 1 s: before the window is moved; 10 s: after KWin placed it.
             GLib.timeout_add(1000, self.report_clock, clock)
+            GLib.timeout_add(10000, self.report_clock, clock)
 
         # The page reports at t+4, t+12 and t+22; leave time for the last one.
         GLib.timeout_add_seconds(30, self.quit)
