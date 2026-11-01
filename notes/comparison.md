@@ -5,6 +5,8 @@ content size and the same output.
 
 - **Build**: 0.1.14473 (the launcher updated the AppImage when the online
   session quit; the Rust shell was re-extracted from that AppImage).
+- **Machine**: AMD Ryzen 7 5700X3D (8C/16T), Radeon RX 6750 XT (`radeonsi`,
+  Mesa 26.2.4), Plasma 6/KWin 6.7.5 Wayland; DP-1 is 1920×1080 @ 144 Hz.
 - **Store**: both read and write `~/.config/Daggerfall JavaScript/Prefs` and
   `Saves`. Same settings, same keybinds, same saves.
 - **Scene**: Offline → Test Room → "Enter as the Nord Warrior", the opening

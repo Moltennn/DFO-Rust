@@ -103,8 +103,8 @@ UI with `xdotool` moves the real cursor; this does not touch it.
 
 ## What has been measured
 
-On this machine (Ryzen 8-core, RX 6750 XT, Mesa 26.2.4, WebKitGTK 2.54.1,
-1280×800):
+On this machine (AMD Ryzen 7 5700X3D, 8C/16T; Radeon RX 6750 XT; Mesa 26.2.4;
+WebKitGTK 2.54.1; 1280×800):
 
 | | |
 |---|---|

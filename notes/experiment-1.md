@@ -3,8 +3,9 @@
 Date: 2026-11-01. Build: DFO Online **0.1.14461** (the current AppImage's
 `app.asar`, extracted to plain files; 32,579 files / 347.2 MiB).
 
-Machine: 8-core Ryzen, AMD RX 6750 XT (`radeonsi`, Mesa 26.2.4, kernel 7.2.9),
-Plasma Wayland, WebKitGTK **2.54.1**, GTK 3.24.52, Rust 1.99.
+Machine: AMD Ryzen 7 5700X3D (8C/16T), AMD RX 6750 XT (`radeonsi`, Mesa
+26.2.4, kernel 7.2.9), Plasma Wayland, WebKitGTK **2.54.1**, GTK 3.24.52,
+Rust 1.99.
 
 ## What ran
 
